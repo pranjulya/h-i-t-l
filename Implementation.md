@@ -38,7 +38,7 @@ When documents disagree: PRD product rules → approval state machine legal tran
 | 04 | Revalidation, concurrency, idempotency | 03 | TESTED |
 | 05 | Execution service, demo adapter, reconciliation | 04 | TESTED |
 | 06 | FastAPI and agent orchestration | 05 | TESTED |
-| 07 | Audit trail, notification delivery, and observability | 06 | NOT_STARTED |
+| 07 | Audit trail, notification delivery, and observability | 06 | TESTED |
 | 08 | Security hardening and failure recovery | 07 | NOT_STARTED |
 | 09 | End-to-end validation, Docker/CI, learning release | 08 | NOT_STARTED |
 

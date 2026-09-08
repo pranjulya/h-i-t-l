@@ -25,14 +25,21 @@ from hitl_ops.application.reconciliation import (
 from hitl_ops.application.revalidation import ExecutionPermit, RevalidationService
 from hitl_ops.domain.enums import IntentState
 from hitl_ops.domain.errors import DomainError, StateConflictError
+from hitl_ops.infrastructure.audit import AuditWriter
+from hitl_ops.infrastructure.notification import LoggingNotificationSink
 from hitl_ops.infrastructure.orm import ActionIntentORM, ExecutionORM
+from hitl_ops.infrastructure.outbox import OutboxPublisher
 from hitl_ops.infrastructure.repositories import PolicyBundleRepository
 
 _EXECUTABLE_STATES = (IntentState.AUTO_APPROVED.value, IntentState.APPROVED.value)
 _TICK_LIMIT = 5
 
 
-async def run_worker_tick(session_factory: Any, adapter: InfrastructureAdapter) -> dict[str, int]:
+async def run_worker_tick(
+    session_factory: Any,
+    adapter: InfrastructureAdapter,
+    notification_sink: Any | None = None,
+) -> dict[str, int]:
     """One bounded worker pass: execute eligible intents, reconcile unknowns.
 
     Reconciliation has exactly one scheduler: this pass. The recovery path may
@@ -99,6 +106,16 @@ async def run_worker_tick(session_factory: Any, adapter: InfrastructureAdapter) 
                 stats["reconciled"] += 1
             except DomainError:
                 stats["skipped"] += 1
+
+    async with session_factory() as session, session.begin():
+        publisher = OutboxPublisher(
+            session,
+            AuditWriter(session),
+            notification_sink or LoggingNotificationSink(),
+        )
+        publication = await publisher.publish_pending()
+        stats["audited"] = publication["audited"]
+        stats["notified"] = publication["notified"]
     return stats
 
 
