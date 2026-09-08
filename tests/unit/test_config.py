@@ -53,5 +53,6 @@ def test_valid_production_configuration_is_accepted() -> None:
         _env_file=None,
         app_env=Environment.PRODUCTION,
         database_url="postgresql+asyncpg://svc:9f8e7d6c@db.internal:5432/hitl_ops",
+        identity_shared_secret="a" * 32,
     )
     assert resolved.is_production is True
