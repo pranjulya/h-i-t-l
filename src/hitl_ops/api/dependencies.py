@@ -37,12 +37,15 @@ def get_actor(
     if not authorization or not authorization.lower().startswith("bearer "):
         raise ForbiddenError("authenticated context required")
     token = authorization.split(" ", 1)[1].strip()
-    actor = validate_token(
-        token,
-        shared_secret=settings.identity_shared_secret,
-        issuer=settings.identity_issuer,
-        audience=settings.identity_audience,
-    )
+    try:
+        actor = validate_token(
+            token,
+            shared_secret=settings.identity_shared_secret,
+            issuer=settings.identity_issuer,
+            audience=settings.identity_audience,
+        )
+    except Exception as exc:
+        raise ForbiddenError("authenticated context required") from exc
     return actor
 
 

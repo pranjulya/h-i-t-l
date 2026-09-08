@@ -110,7 +110,7 @@ class OutboxPublisher:
             claim_expires_at = now + timedelta(seconds=self._claim_lease_seconds)
             claimed: list[uuid.UUID] = []
             for row in rows:
-                row.attempts += 1
+                row.attempts = (row.attempts or 0) + 1
                 row.claimed_by = worker_id
                 row.claim_expires_at = claim_expires_at
                 claimed.append(row.id)
