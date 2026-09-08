@@ -1,6 +1,6 @@
 # Implementation phases
 
-All phases are specifications only and are `NOT_STARTED`. The user review gate precedes Phase 00.
+Phases marked `TESTED` are implemented with passing local tests (unit and integration), lint, and strict typing; `REVIEWED`/`COMPLETE` are reached through the user review gate. All other phases remain specifications only.
 
 Every phase contains status, goal, rationale, prerequisites, concepts, exact planned files, architecture impact, data flow, edge/failure cases, tests, acceptance criteria, learning outcomes, interview questions, and Definition of Done. Follow numeric order; do not combine phases merely to save review time.
 
