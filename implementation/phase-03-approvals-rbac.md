@@ -1,6 +1,6 @@
 # Phase 03 — Approval State Machine, OIDC, and RBAC
 
-**Status:** NOT_STARTED
+**Status:** TESTED — implemented with state-machine/authorization unit tests and approval transaction, expiry, and role-administration integration tests (distinctness, races, digest binding, audit outbox), Ruff, and strict mypy; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
 
 ## Goal
 

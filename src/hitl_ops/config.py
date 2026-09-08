@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = _DEFAULT_DATABASE_URL
     otel_exporter_otlp_endpoint: str | None = None
+    identity_issuer: str = "https://test-issuer.local"
+    identity_audience: str = "hitl-ops"
+    identity_shared_secret: str | None = None
 
     @field_validator("log_level")
     @classmethod
@@ -72,6 +75,8 @@ class Settings(BaseSettings):
             raise ValueError("production requires an explicitly configured DATABASE_URL")
         if _database_password(self.database_url) in _REJECTED_PRODUCTION_PASSWORDS:
             raise ValueError("production rejects default database credentials")
+        if self.identity_shared_secret is None:
+            raise ValueError("production requires configured identity verification material")
         return self
 
     @property
