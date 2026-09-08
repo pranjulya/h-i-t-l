@@ -15,7 +15,7 @@ from hitl_ops.application.administration import (
     RegisterPolicyBundleCommand,
     RevokeRoleCommand,
 )
-from hitl_ops.domain.errors import ForbiddenError, NotFoundError
+from hitl_ops.domain.errors import ForbiddenError, NotFoundError, StateConflictError
 from hitl_ops.infrastructure.authorization import current_roles
 from hitl_ops.infrastructure.database import build_sessionmaker
 from hitl_ops.infrastructure.identity import AuthenticatedActor
@@ -159,8 +159,6 @@ async def test_policy_bundle_lifecycle_is_administrator_gated(
         )
 
     async with maker() as session, session.begin():
-        from hitl_ops.domain.errors import StateConflictError
-
         with pytest.raises(StateConflictError):
             await AdministrationService(session).register_policy_bundle(
                 RegisterPolicyBundleCommand(

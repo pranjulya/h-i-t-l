@@ -11,9 +11,22 @@ class DomainError(Exception):
     retryable = False
     http_status = 400
 
-    def __init__(self, message: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        code: str | None = None,
+        http_status: int | None = None,
+        retryable: bool | None = None,
+    ) -> None:
         super().__init__(message or self.message)
         self.message = message or self.message
+        if code is not None:
+            self.code = code
+        if http_status is not None:
+            self.http_status = http_status
+        if retryable is not None:
+            self.retryable = retryable
 
 
 class IllegalTransitionError(DomainError):
