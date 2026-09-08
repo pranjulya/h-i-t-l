@@ -35,7 +35,7 @@ When documents disagree: PRD product rules → approval state machine legal tran
 | 01 | Immutable intent domain and PostgreSQL persistence | 00 | TESTED |
 | 02 | Risk and policy evaluation | 01 | TESTED |
 | 03 | Approval state machine, OIDC/RBAC, expiry | 02 | TESTED |
-| 04 | Revalidation, concurrency, idempotency | 03 | NOT_STARTED |
+| 04 | Revalidation, concurrency, idempotency | 03 | TESTED |
 | 05 | Execution service, demo adapter, reconciliation | 04 | NOT_STARTED |
 | 06 | FastAPI and agent orchestration | 05 | NOT_STARTED |
 | 07 | Audit trail, notification delivery, and observability | 06 | NOT_STARTED |
