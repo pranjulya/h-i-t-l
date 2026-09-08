@@ -13,9 +13,12 @@ so the durable EXPIRED transition persists; retries then observe EXPIRED state.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import DBAPIError, OperationalError
@@ -26,6 +29,7 @@ from hitl_ops.domain.errors import (
     ApprovalExpiredError,
     ApprovalStaleError,
     ForbiddenError,
+    IdempotencyConflictError,
     IllegalTransitionError,
     NotFoundError,
     StateConflictError,
@@ -37,6 +41,7 @@ from hitl_ops.infrastructure.identity import AuthenticatedActor
 from hitl_ops.infrastructure.orm import (
     ActionIntentORM,
     ApprovalDecisionORM,
+    IdempotencyRecordORM,
     OutboxMessageORM,
     PolicyEvaluationORM,
     StateTransitionORM,
@@ -391,3 +396,114 @@ class ApprovalCommandService:
         )
         await self._session.flush()
         return _snapshot(intent)
+
+
+def canonical_request_hash(payload: dict[str, Any]) -> str:
+    """Semantic request identity: key order and whitespace never matter."""
+
+    canonical = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def idempotency_key_hash(key: str) -> str:
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class IdempotencyReservation:
+    replayed: bool
+    pending: bool
+    response_status: int | None
+    response_body: dict[str, Any] | None
+
+
+class IdempotencyService:
+    """Command idempotency over the idempotency_records table.
+
+    Same key + same semantic request replays the original response; same key
+    with a changed body is a conflict; a fresh key reserves the command.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def begin(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        scope: str,
+        key: str,
+        request_payload: dict[str, Any],
+        expires_at: datetime | None = None,
+    ) -> IdempotencyReservation:
+        key_hash = idempotency_key_hash(key)
+        request_hash = canonical_request_hash(request_payload)
+        existing = (
+            await self._session.execute(
+                select(IdempotencyRecordORM).where(
+                    IdempotencyRecordORM.tenant_id == tenant_id,
+                    IdempotencyRecordORM.actor_id == actor_id,
+                    IdempotencyRecordORM.scope == scope,
+                    IdempotencyRecordORM.key_hash == key_hash,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            if existing.request_hash != request_hash:
+                raise IdempotencyConflictError("idempotency key reused with different request")
+            if existing.status == "COMPLETED":
+                return IdempotencyReservation(
+                    replayed=True,
+                    pending=False,
+                    response_status=existing.response_status,
+                    response_body=existing.response_body,
+                )
+            return IdempotencyReservation(
+                replayed=True, pending=True, response_status=None, response_body=None
+            )
+        self._session.add(
+            IdempotencyRecordORM(
+                tenant_id=tenant_id,
+                actor_id=actor_id,
+                scope=scope,
+                key_hash=key_hash,
+                request_hash=request_hash,
+                status="PENDING",
+                expires_at=expires_at,
+            )
+        )
+        await self._session.flush()
+        return IdempotencyReservation(
+            replayed=False, pending=False, response_status=None, response_body=None
+        )
+
+    async def complete(
+        self,
+        *,
+        tenant_id: str,
+        actor_id: str,
+        scope: str,
+        key: str,
+        response_status: int,
+        response_body: dict[str, Any],
+    ) -> None:
+        key_hash = idempotency_key_hash(key)
+        existing = (
+            await self._session.execute(
+                select(IdempotencyRecordORM).where(
+                    IdempotencyRecordORM.tenant_id == tenant_id,
+                    IdempotencyRecordORM.actor_id == actor_id,
+                    IdempotencyRecordORM.scope == scope,
+                    IdempotencyRecordORM.key_hash == key_hash,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            raise NotFoundError("idempotency reservation not found")
+        existing.status = "COMPLETED"
+        existing.response_status = response_status
+        existing.response_body = response_body
+        await self._session.flush()
