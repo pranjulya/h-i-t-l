@@ -89,3 +89,23 @@ These are intentionally resolved at the named ADR gate, not left ambiguous: sele
 
 Implementation may begin only when the user approves this package. On approval, Phase 00 moves from `NOT_STARTED` to `IN_PROGRESS`; no later phase begins until its prerequisites and preceding review gate pass.
 
+
+## 11. Release evidence (Phase 09)
+
+Evidence mapping for the PRD §11 success criteria and the checklists above.
+All suites run with `uv run pytest -q` (unit + contract + integration + e2e +
+security + failure) against PostgreSQL 16.
+
+| PRD success criterion | Evidence |
+|---|---|
+| Every V1 tool follows its required approval route under tested policies | `tests/unit/test_risk_policy_matrix.py`, `tests/e2e/test_e2e_journeys.py` |
+| One-byte material change → new digest, stale approvals | `tests/integration/test_concurrent_claim.py::test_one_byte_material_change_stales_the_claim`, `tests/unit/test_canonical_intent.py` |
+| Two concurrent executions → at most one adapter invocation | `tests/integration/test_concurrent_claim.py`, `tests/failure/test_worker_crash.py` |
+| Replayed API calls return the original result or a deterministic conflict | `tests/api/test_intent_routes.py`, `tests/integration/test_idempotency_transactions.py` |
+| Self-approval and duplicate CRITICAL approvers rejected | `tests/integration/test_approval_transactions.py` |
+| Policy/authorization changes observed during revalidation | `tests/integration/test_policy_auth_refresh.py` |
+| Crash after provider send → reconciliation, not blind retry | `tests/integration/test_reconciliation.py`, `tests/failure/test_worker_crash.py` |
+| Audit reconstruction answers who/what/when/why/version/outcome | `tests/integration/test_audit_ordering.py`, `tests/e2e/test_e2e_journeys.py::test_audit_chain_reconstructs_the_journey`, `docs/operations/runbooks.md` |
+
+Threat-model controls: `tests/security/`, `tests/failure/`, residual risks in
+`docs/architecture/threat-model.md` §9. Release gates: `docs/operations/release-checklist.md`.
