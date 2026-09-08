@@ -134,6 +134,7 @@ async def create_pending_intent(
         "expected_state_version": 4,
         "requester_id": requester_id,
         "tenant_id": tenant_id,
+        "state": "AUTO_APPROVED" if policy.disposition.value == "ALLOW" else "PENDING_APPROVAL_1",
     }
 
 
@@ -177,6 +178,10 @@ async def create_approved_intent(
         )
         pending[f"approver_{len(pending)}"] = approver
     await session.flush()
+
+    if pending.get("state") == "AUTO_APPROVED":
+        pending["auto_approved"] = True
+        return pending
 
     levels = [1] if len(roles) == 1 else [1, 2]
     version = pending["expected_state_version"]

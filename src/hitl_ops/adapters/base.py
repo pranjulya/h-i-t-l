@@ -33,3 +33,42 @@ class DenyingTargetQuery:
 
     async def fetch(self, tool: ToolName, parameters: dict[str, Any]) -> TargetSnapshot:
         return TargetSnapshot(found=False, identity={}, health="unknown", facts={})
+
+
+class AdapterPreSendError(Exception):
+    """The adapter rejected the operation before any provider interaction."""
+
+
+class AdapterUnavailableError(Exception):
+    """The provider could not be reached; whether a send happened is unknown."""
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterCommand:
+    """Typed command data; adapters never receive tool names plus arbitrary dicts."""
+
+    operation_key: str
+    precondition_token: str
+    parameters: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterResult:
+    """Sanitized provider outcome evidence."""
+
+    outcome: str  # ExecutionOutcome value: SUCCEEDED | FAILED | UNKNOWN
+    provider_operation_id: str | None
+    summary: dict[str, Any]
+    error_code: str | None = None
+
+
+class InfrastructureAdapter(Protocol):
+    """The only privileged infrastructure path; implementations own credentials."""
+
+    async def execute(self, tool: ToolName, command: AdapterCommand) -> AdapterResult: ...
+
+    async def lookup_status(
+        self, tool: ToolName, operation_key: str, provider_operation_id: str | None
+    ) -> AdapterResult:
+        """Return provider evidence for reconciliation, or outcome UNKNOWN."""
+        ...
