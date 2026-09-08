@@ -1,10 +1,10 @@
 # Project 05 — Human-in-the-Loop AI Ops Workflow
 
-**Status:** PLANNING_COMPLETE — awaiting user review; application implementation has not started.
+**Status:** IMPLEMENTED — phases 00–09 are implemented and `TESTED` locally (261 automated tests; unit, contract, integration on PostgreSQL 16, e2e, security, failure). `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
 
 This repository plans a production-minded AI Ops workflow in which an LLM may propose actions but cannot execute infrastructure operations. Deterministic domain services classify risk, apply policy, collect human approval, revalidate the exact immutable intent, execute through allow-listed adapters, and append an audit trail.
 
-Start with [Implementation.md](Implementation.md), then follow the review order below. No `src/`, migrations, containers, workflow files, or application tests exist yet by design.
+Start with [Implementation.md](Implementation.md), then follow the review order below. The application lives in `src/hitl_ops/` with migrations in `alembic/`; run and test commands are below.
 
 ## Locked V1 scope
 

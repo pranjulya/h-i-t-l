@@ -1,6 +1,6 @@
 # Implementation phases
 
-Phases marked `TESTED` are implemented with passing local tests (unit and integration), lint, and strict typing; `REVIEWED`/`COMPLETE` are reached through the user review gate. All other phases remain specifications only.
+All phases 00–09 are implemented and `TESTED` locally (unit, contract, integration on PostgreSQL 16, e2e, security, and failure suites; Ruff and strict mypy clean). `REVIEWED`/`COMPLETE` are reached through the user review gate.
 
 Every phase contains status, goal, rationale, prerequisites, concepts, exact planned files, architecture impact, data flow, edge/failure cases, tests, acceptance criteria, learning outcomes, interview questions, and Definition of Done. Follow numeric order; do not combine phases merely to save review time.
 

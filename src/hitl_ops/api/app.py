@@ -49,18 +49,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings()
     configure_logging(resolved.log_level, resolved.app_env.value)
 
+    engine = build_engine(resolved.database_url)
+    sessionmaker = build_sessionmaker(engine)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        app.state.engine = build_engine(resolved.database_url)
-        app.state.sessionmaker = build_sessionmaker(app.state.engine)
+        app.state.engine = engine
+        app.state.sessionmaker = sessionmaker
         try:
             yield
         finally:
-            await app.state.engine.dispose()
+            await engine.dispose()
 
     rate_limiter = SlidingWindowRateLimiter(resolved.rate_limit_per_minute)
     app = FastAPI(title="HITL AI Ops", version="0.1.0", lifespan=lifespan)
     app.state.settings = resolved
+    app.state.engine = engine
+    app.state.sessionmaker = sessionmaker
     app.state.orchestrator = AgentOrchestrator(DisabledLLMProvider())
     register_error_handlers(app)
 

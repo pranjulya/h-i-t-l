@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Execute exactly one approved phase at a time. Use test-first implementation, review the diff against the phase acceptance criteria, and never advance status on partial evidence.
 
-**Status:** PLANNING_COMPLETE — all implementation phases `NOT_STARTED`; awaiting user approval  
+**Status:** IMPLEMENTED — all phases through 09 `TESTED` locally (unit/contract/integration/e2e/security/failure); `REVIEWED`/`COMPLETE` follow the user end-to-end review gate  
 **Goal:** Build a production-minded HITL AI Ops workflow in which model proposals pass deterministic risk, policy, human approval, revalidation, idempotent execution, and durable audit controls.  
 **Architecture:** Plain Python domain/application services own every business rule. FastAPI exposes strict contracts; PostgreSQL is authoritative; an isolated execution worker calls typed adapters; the audit trail is delivered through a transactional outbox.  
 **Tech stack:** Python 3.12+, FastAPI, Pydantic v2, PostgreSQL 16+, SQLAlchemy 2, Alembic, pytest, Ruff, mypy, HTTPX, OpenTelemetry, Docker, GitHub Actions; optional Redis only when justified.  
@@ -40,7 +40,7 @@ When documents disagree: PRD product rules → approval state machine legal tran
 | 06 | FastAPI and agent orchestration | 05 | TESTED |
 | 07 | Audit trail, notification delivery, and observability | 06 | TESTED |
 | 08 | Security hardening and failure recovery | 07 | TESTED |
-| 09 | End-to-end validation, Docker/CI, learning release | 08 | NOT_STARTED |
+| 09 | End-to-end validation, Docker/CI, learning release | 08 | TESTED |
 
 ## Cross-phase verification gates
 
