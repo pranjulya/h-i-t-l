@@ -120,13 +120,50 @@ class IdempotencyRecordORM(Base):
 
 class OutboxMessageORM(Base):
     __tablename__ = "outbox_messages"
+    __table_args__ = (Index("ix_outbox_messages_pending", "published_at", "created_at"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     topic: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class AuditEventORM(Base):
+    """Append-only, hash-linked audit evidence (no updates or deletes permitted)."""
+
+    __tablename__ = "audit_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "aggregate_id",
+            "sequence",
+            name="uq_audit_events_aggregate_sequence",
+        ),
+        Index("ix_audit_events_aggregate", "tenant_id", "aggregate_id", "sequence"),
+    )
+
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    tenant_id: Mapped[str] = mapped_column(String(63), nullable=False)
+    aggregate_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    aggregate_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    causation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    policy_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    risk_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    attributes: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    previous_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
 
 
 class RiskEvaluationORM(Base):

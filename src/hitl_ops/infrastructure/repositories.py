@@ -205,6 +205,21 @@ class EvaluationRepository:
             ),
             transition(IntentState.POLICY_EVALUATED.value, route_state.value, "route", 4),
         ]
+        transition_outbox = [
+            OutboxMessageORM(
+                topic="intent.transitioned",
+                payload={
+                    "tenant_id": tenant_id,
+                    "intent_id": str(intent_id),
+                    "revision": revision,
+                    "from_state": t.from_state,
+                    "to_state": t.to_state,
+                    "command_id": command_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+            for t in transitions
+        ]
         outbox_rows = [
             OutboxMessageORM(
                 topic="risk.evaluated",
@@ -233,7 +248,9 @@ class EvaluationRepository:
                 },
             ),
         ]
-        self._session.add_all([risk_row, policy_row, *transitions, *outbox_rows])
+        self._session.add_all(
+            [risk_row, policy_row, *transitions, *outbox_rows, *transition_outbox]
+        )
 
         intent.state = route_state.value
         intent.state_version = 4

@@ -20,12 +20,14 @@ from hitl_ops.domain.models import CreateIntentCommand
 from hitl_ops.domain.policy import evaluate_policy
 from hitl_ops.domain.risk import RiskContext, evaluate_risk
 from hitl_ops.domain.state_machine import CANCELLABLE_STATES
+from hitl_ops.infrastructure.audit import verify_aggregate_chain
 from hitl_ops.infrastructure.identity import (
     AuthenticatedActor,
 )
 from hitl_ops.infrastructure.orm import (
     ActionIntentORM,
     ApprovalDecisionORM,
+    AuditEventORM,
     ExecutionORM,
     PolicyEvaluationORM,
     RiskEvaluationORM,
@@ -397,4 +399,37 @@ async def get_events(
         for r in rows
     ]
     next_cursor = items[-1]["sequence"] if len(items) == limit else None
-    return {"events": items, "next_cursor": next_cursor}
+
+    audit_rows = (
+        (
+            await session.execute(
+                select(AuditEventORM)
+                .where(
+                    AuditEventORM.tenant_id == actor.tenant_id,
+                    AuditEventORM.aggregate_id == intent_id,
+                )
+                .order_by(AuditEventORM.sequence)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    chain_valid, chain_problem = await verify_aggregate_chain(session, actor.tenant_id, intent_id)
+    audit = [
+        {
+            "sequence": a.sequence,
+            "event_type": a.event_type,
+            "actor_id": a.actor_id,
+            "occurred_at": a.occurred_at.isoformat(),
+            "previous_hash": a.previous_hash,
+            "event_hash": a.event_hash,
+        }
+        for a in audit_rows
+    ]
+    return {
+        "events": items,
+        "next_cursor": next_cursor,
+        "audit": audit,
+        "chain_valid": chain_valid,
+        "chain_problem": chain_problem,
+    }
