@@ -68,7 +68,7 @@ class OutboxPublisher:
         )
         stats = {"audited": 0, "notified": 0, "failed": 0}
         for row in rows:
-            row.attempts += 1
+            row.attempts = (row.attempts or 0) + 1
             try:
                 if row.topic in _AUDIT_TOPICS:
                     await self._deliver_audit(row)

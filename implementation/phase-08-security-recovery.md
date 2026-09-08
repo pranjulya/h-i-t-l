@@ -1,6 +1,6 @@
 # Phase 08 — Security Hardening and Failure Recovery
 
-**Status:** NOT_STARTED
+**Status:** TESTED — implemented with security (injection, tenancy, tokens, roles, redaction, dynamic-execution denial) and failure (database, LLM, adapter, audit sink, worker crash, Redis loss) suites plus operations runbooks and residual-risk evidence; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
 
 ## Goal
 

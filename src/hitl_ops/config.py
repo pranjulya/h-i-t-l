@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     identity_issuer: str = "https://test-issuer.local"
     identity_audience: str = "hitl-ops"
     identity_shared_secret: str | None = None
+    max_request_bytes: int = 65536
+    rate_limit_per_minute: int = 120
 
     @field_validator("log_level")
     @classmethod

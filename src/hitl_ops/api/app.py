@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from hitl_ops.agent.orchestrator import AgentOrchestrator, DisabledLLMProvider
 from hitl_ops.api import admin, approvals, intents
 from hitl_ops.api.errors import register_error_handlers
+from hitl_ops.api.rate_limit import SlidingWindowRateLimiter
 from hitl_ops.config import Settings
 from hitl_ops.infrastructure.database import (
     build_engine,
@@ -42,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             await app.state.engine.dispose()
 
+    rate_limiter = SlidingWindowRateLimiter(resolved.rate_limit_per_minute)
     app = FastAPI(title="HITL AI Ops", version="0.1.0", lifespan=lifespan)
     app.state.settings = resolved
     app.state.orchestrator = AgentOrchestrator(DisabledLLMProvider())
@@ -52,13 +54,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin.router)
 
     @app.middleware("http")
-    async def correlation_middleware(
+    async def hardening_middleware(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         correlation_id = request.headers.get("X-Correlation-ID") or uuid.uuid4().hex
         request.state.correlation_id = correlation_id
+
+        content_length = request.headers.get("content-length")
+        if (
+            content_length
+            and content_length.isdigit()
+            and int(content_length) > resolved.max_request_bytes
+        ):
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "error": {
+                        "code": "PAYLOAD_TOO_LARGE",
+                        "message": "request body exceeds the configured limit",
+                        "retryable": False,
+                        "correlation_id": correlation_id,
+                        "details": {},
+                    }
+                },
+            )
+        if not rate_limiter.allow(request.client.host if request.client else "anonymous"):
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "error": {
+                        "code": "RATE_LIMITED",
+                        "message": "request rate exceeded; retry later",
+                        "retryable": True,
+                        "correlation_id": correlation_id,
+                        "details": {},
+                    }
+                },
+            )
         response = await call_next(request)
         response.headers["X-Correlation-ID"] = correlation_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Cache-Control"] = "no-store"
         return response
 
     @app.get("/health/live")
