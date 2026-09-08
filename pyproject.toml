@@ -44,6 +44,9 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "S", "SIM", "RUF"]
 ignore = ["S101"]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106"]
+
 [tool.mypy]
 strict = true
 mypy_path = "src"
