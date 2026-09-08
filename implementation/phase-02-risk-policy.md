@@ -1,6 +1,6 @@
 # Phase 02 — Deterministic Risk and Policy
 
-**Status:** NOT_STARTED
+**Status:** TESTED — implemented with matrix/property/persistence tests (fail-closed unknowns, monotonic escalation, seed bundle), Ruff, and strict mypy; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
 
 ## Goal
 

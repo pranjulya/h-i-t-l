@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Index,
@@ -122,6 +123,74 @@ class OutboxMessageORM(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     topic: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class RiskEvaluationORM(Base):
+    __tablename__ = "risk_evaluations"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "intent_id",
+            "intent_revision",
+            "generation",
+            name="uq_risk_evaluations_revision_generation",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[str] = mapped_column(String(63), nullable=False)
+    intent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    intent_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    band: Mapped[str] = mapped_column(String(16), nullable=False)
+    factors: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    rule_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    evaluated_context: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PolicyEvaluationORM(Base):
+    __tablename__ = "policy_evaluations"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "intent_id",
+            "intent_revision",
+            "generation",
+            name="uq_policy_evaluations_revision_generation",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[str] = mapped_column(String(63), nullable=False)
+    intent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    intent_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    disposition: Mapped[str] = mapped_column(String(32), nullable=False)
+    route: Mapped[str] = mapped_column(String(32), nullable=False)
+    required_roles: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    required_scopes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    obligations: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    reason_codes: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    approval_ttl_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    evaluated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class PolicyBundleORM(Base):
+    __tablename__ = "policy_bundles"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    version: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    rules: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
