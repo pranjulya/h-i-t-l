@@ -55,19 +55,54 @@ async def test_decision_on_expired_window_moves_to_expired(
         assert intent is not None
         intent.approval_expires_at = datetime.now(UTC) - timedelta(seconds=1)
 
-    async with maker() as session:
-        try:
+    # Caller commits on the expiry path so the EXPIRED transition persists;
+    # rolling back here would discard the durable expiry the error reports.
+    async with maker() as session, session.begin():
+        with pytest.raises(ApprovalExpiredError):
             await ApprovalCommandService(session).decide(_command(pending))
-            await session.commit()
-            pytest.fail("expected ApprovalExpiredError")
-        except ApprovalExpiredError:
-            await session.commit()
 
     async with maker() as session, session.begin():
         intent = await session.get(ActionIntentORM, ("tenant-1", pending["intent_id"], 1))
         assert intent is not None
         assert intent.state == IntentState.EXPIRED.value
         assert intent.state_version == pending["expected_state_version"] + 1
+
+    # The retried command observes the durable EXPIRED state, not a replay of
+    # the expiry error path: still EXPIRED, still +1 version, no new transition.
+    # The retry carries the pre-expiry expected version, so the version guard
+    # rejects it before any new transition row can be written.
+    from hitl_ops.domain.errors import StateConflictError
+
+    async with maker() as session, session.begin():
+        from sqlalchemy import func, select
+
+        from hitl_ops.infrastructure.orm import StateTransitionORM
+
+        before = (
+            await session.execute(
+                select(func.count())
+                .select_from(StateTransitionORM)
+                .where(StateTransitionORM.intent_id == pending["intent_id"])
+            )
+        ).scalar_one()
+
+    async with maker() as session, session.begin():
+        with pytest.raises(StateConflictError):
+            await ApprovalCommandService(session).decide(_command(pending))
+
+    async with maker() as session, session.begin():
+        from sqlalchemy import func, select
+
+        from hitl_ops.infrastructure.orm import StateTransitionORM
+
+        after = (
+            await session.execute(
+                select(func.count())
+                .select_from(StateTransitionORM)
+                .where(StateTransitionORM.intent_id == pending["intent_id"])
+            )
+        ).scalar_one()
+        assert after == before
 
 
 async def test_decision_within_window_succeeds(migrated_database: str, engine: AsyncEngine) -> None:
