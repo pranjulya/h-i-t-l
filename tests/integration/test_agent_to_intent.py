@@ -44,7 +44,6 @@ def test_agent_path_creates_the_same_intent_as_direct() -> None:
                 "tool": "scale_service",
                 "parameters": {"environment": "staging", "service": "api", "replicas": 4},
                 "rationale": "cpu saturation",
-                "source": "DIRECT",
             },
             headers={**bearer(), "Idempotency-Key": "direct-1"},
         )

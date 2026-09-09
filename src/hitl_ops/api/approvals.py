@@ -6,13 +6,14 @@ import uuid
 from typing import Any, Literal
 
 from fastapi import APIRouter
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from hitl_ops.api.dependencies import ActorDep, SessionDep
+from hitl_ops.api.dependencies import ActorDep, IdempotencyDep, SessionDep
 from hitl_ops.application.commands import (
     ApprovalCommandService,
     ApprovalDecisionCommand,
     CancelIntentCommand,
+    IdempotencyService,
 )
 from hitl_ops.domain.enums import ApprovalDecision
 from hitl_ops.domain.models import IntentSnapshot
@@ -21,15 +22,20 @@ router = APIRouter(prefix="/v1")
 
 
 class ApprovalBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     revision: int = Field(ge=1)
     intent_digest: str = Field(min_length=64, max_length=64)
     level: int = Field(ge=1, le=2)
     decision: Literal["APPROVE", "REJECT"]
     reason: str = Field(min_length=1, max_length=2000)
     expected_state_version: int = Field(ge=1)
+    obligations: dict[str, str] = Field(default_factory=dict)
 
 
 class CancelBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     revision: int = Field(ge=1)
     reason: str = Field(min_length=1, max_length=2000)
     expected_state_version: int = Field(ge=1)
@@ -47,8 +53,22 @@ def _snapshot(snapshot: IntentSnapshot) -> dict[str, Any]:
 
 @router.post("/intents/{intent_id}/approvals")
 async def decide_approval(
-    session: SessionDep, actor: ActorDep, intent_id: uuid.UUID, body: ApprovalBody
+    session: SessionDep,
+    actor: ActorDep,
+    intent_id: uuid.UUID,
+    body: ApprovalBody,
+    idempotency_key: IdempotencyDep,
 ) -> dict[str, Any]:
+    idempotency = IdempotencyService(session)
+    reservation = await idempotency.begin(
+        tenant_id=actor.tenant_id,
+        actor_id=actor.actor_id,
+        scope="approvals",
+        key=idempotency_key,
+        request_payload={"intent_id": str(intent_id), **body.model_dump()},
+    )
+    if reservation.replayed and reservation.response_body is not None:
+        return reservation.response_body
     service = ApprovalCommandService(session)
     snapshot = await service.decide(
         ApprovalDecisionCommand(
@@ -62,15 +82,39 @@ async def decide_approval(
             expected_state_version=body.expected_state_version,
             actor=actor,
             command_id=uuid.uuid4().hex,
+            obligations=body.obligations,
         )
     )
-    return _snapshot(snapshot)
+    response = _snapshot(snapshot)
+    await idempotency.complete(
+        tenant_id=actor.tenant_id,
+        actor_id=actor.actor_id,
+        scope="approvals",
+        key=idempotency_key,
+        response_status=200,
+        response_body=response,
+    )
+    return response
 
 
 @router.post("/intents/{intent_id}/cancel")
 async def cancel_intent(
-    session: SessionDep, actor: ActorDep, intent_id: uuid.UUID, body: CancelBody
+    session: SessionDep,
+    actor: ActorDep,
+    intent_id: uuid.UUID,
+    body: CancelBody,
+    idempotency_key: IdempotencyDep,
 ) -> dict[str, Any]:
+    idempotency = IdempotencyService(session)
+    reservation = await idempotency.begin(
+        tenant_id=actor.tenant_id,
+        actor_id=actor.actor_id,
+        scope="cancellations",
+        key=idempotency_key,
+        request_payload={"intent_id": str(intent_id), **body.model_dump()},
+    )
+    if reservation.replayed and reservation.response_body is not None:
+        return reservation.response_body
     service = ApprovalCommandService(session)
     snapshot = await service.cancel(
         CancelIntentCommand(
@@ -83,4 +127,13 @@ async def cancel_intent(
             command_id=uuid.uuid4().hex,
         )
     )
-    return _snapshot(snapshot)
+    response = _snapshot(snapshot)
+    await idempotency.complete(
+        tenant_id=actor.tenant_id,
+        actor_id=actor.actor_id,
+        scope="cancellations",
+        key=idempotency_key,
+        response_status=200,
+        response_body=response,
+    )
+    return response

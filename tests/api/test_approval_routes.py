@@ -70,8 +70,9 @@ def test_approval_route_commits_decision(migrated_database, engine) -> None:
                 "decision": "APPROVE",
                 "reason": "looks safe",
                 "expected_state_version": pending["version"],
+                "obligations": {"announce_in_incident_channel": "inc-123"},
             },
-            headers=bearer(actor="approver-1"),
+            headers={**bearer(actor="approver-1"), "Idempotency-Key": "d-1"},
         )
     assert response.status_code == 200
     assert response.json()["state"] == "APPROVED"
@@ -92,7 +93,7 @@ def test_approval_stale_digest_conflicts(migrated_database, engine) -> None:
                 "reason": "stale",
                 "expected_state_version": pending["version"],
             },
-            headers=bearer(actor="approver-1"),
+            headers={**bearer(actor="approver-1"), "Idempotency-Key": "d-2"},
         )
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "APPROVAL_STALE"
@@ -112,7 +113,7 @@ def test_unauthorized_approver_gets_forbidden(migrated_database, engine) -> None
                 "reason": "no role",
                 "expected_state_version": pending["version"],
             },
-            headers=bearer(actor="random-1"),
+            headers={**bearer(actor="random-1"), "Idempotency-Key": "d-3"},
         )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "FORBIDDEN"
@@ -129,7 +130,7 @@ def test_cancel_route_by_requester(migrated_database, engine) -> None:
                 "reason": "no longer needed",
                 "expected_state_version": pending["version"],
             },
-            headers=bearer(),
+            headers={**bearer(), "Idempotency-Key": "c-1"},
         )
     assert response.status_code == 200
     assert response.json()["state"] == "CANCELLED"
@@ -148,6 +149,6 @@ def test_missing_intent_returns_not_found(migrated_database, engine) -> None:
                 "reason": "missing",
                 "expected_state_version": 4,
             },
-            headers=bearer(actor="approver-1"),
+            headers={**bearer(actor="approver-1"), "Idempotency-Key": "d-4"},
         )
     assert response.status_code == 404
