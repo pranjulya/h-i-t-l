@@ -115,6 +115,7 @@ class ExecutionService:
                         operation_key=permit.operation_key,
                         precondition_token=permit.precondition_token,
                         parameters=permit.typed_parameters,
+                        resource_version=permit.resource_version,
                     ),
                 ),
                 timeout=timeout_seconds,
