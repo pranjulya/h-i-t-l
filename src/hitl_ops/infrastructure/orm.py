@@ -165,6 +165,13 @@ class PolicyEvaluationORM(Base):
             "generation",
             name="uq_policy_evaluations_revision_generation",
         ),
+        Index(
+            "ix_policy_evaluations_intent",
+            "tenant_id",
+            "intent_id",
+            "intent_revision",
+            "generation",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
