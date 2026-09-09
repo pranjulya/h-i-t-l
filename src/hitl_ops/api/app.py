@@ -30,6 +30,21 @@ from hitl_ops.observability.logging import configure_logging
 _READINESS_TIMEOUT_SECONDS = 2.0
 
 
+def _payload_too_large(correlation_id: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=413,
+        content={
+            "error": {
+                "code": "PAYLOAD_TOO_LARGE",
+                "message": "request body exceeds the configured limit",
+                "retryable": False,
+                "correlation_id": correlation_id,
+                "details": {},
+            }
+        },
+    )
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings()
     configure_logging(resolved.log_level, resolved.app_env.value)
@@ -66,18 +81,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and content_length.isdigit()
             and int(content_length) > resolved.max_request_bytes
         ):
-            return JSONResponse(
-                status_code=413,
-                content={
-                    "error": {
-                        "code": "PAYLOAD_TOO_LARGE",
-                        "message": "request body exceeds the configured limit",
-                        "retryable": False,
-                        "correlation_id": correlation_id,
-                        "details": {},
-                    }
-                },
-            )
+            return _payload_too_large(correlation_id)
+        # Chunked bodies and requests without Content-Length must be capped by
+        # the actual body size, not just the advertised header.
+        body = await request.body()
+        if len(body) > resolved.max_request_bytes:
+            return _payload_too_large(correlation_id)
+
         if not rate_limiter.allow(request.client.host if request.client else "anonymous"):
             return JSONResponse(
                 status_code=429,

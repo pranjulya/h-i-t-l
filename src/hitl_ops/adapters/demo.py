@@ -21,6 +21,22 @@ from hitl_ops.domain.enums import ExecutionOutcome, ToolName
 
 _PROVIDER_FAILURE_SERVICE = "boom-api"
 _TIMEOUT_AFTER_SEND_SERVICE = "timeout-api"
+_HOSTILE_PARAMETER_KEYS = frozenset(
+    {
+        "credentials",
+        "credential",
+        "token",
+        "secret",
+        "password",
+        "api_key",
+        "apikey",
+        "shell_command",
+        "command",
+        "url",
+        "endpoint",
+        "host",
+    }
+)
 
 
 def _provider_operation_id(operation_key: str) -> str:
@@ -84,7 +100,7 @@ class DemoInfrastructureAdapter:
                 error_code=existing["error_code"],
             )
 
-        if "credentials" in command.parameters:
+        if any(key in command.parameters for key in _HOSTILE_PARAMETER_KEYS):
             raise AdapterPreSendError("adapter accepts operational parameters only")
 
         # Atomic compare-and-mutate on the provider-side resource version.

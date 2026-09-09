@@ -6,7 +6,6 @@ from fastapi.testclient import TestClient
 
 from hitl_ops.api.app import create_app
 from tests.api.conftest import api_settings, bearer
-from tests.security.conftest import hardened_database  # noqa: F401
 
 
 def test_sql_injection_payloads_are_rejected_by_schema(hardened_database) -> None:
