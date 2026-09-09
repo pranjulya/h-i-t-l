@@ -83,6 +83,7 @@ def upgrade() -> None:
     op.create_table(
         "policy_bundles",
         sa.Column("id", pg.UUID(as_uuid=True), nullable=False),
+        sa.Column("tenant_id", sa.String(length=63), nullable=False),
         sa.Column("version", sa.String(length=32), nullable=False),
         sa.Column("rules", pg.JSONB(), nullable=False),
         sa.Column("is_active", sa.Boolean(), server_default=sa.text("false"), nullable=False),
@@ -93,14 +94,21 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name="pk_policy_bundles"),
-        sa.UniqueConstraint("version", name="uq_policy_bundles_version"),
+        sa.UniqueConstraint("tenant_id", "version", name="uq_policy_bundles_tenant_version"),
+    )
+    op.create_index(
+        "uq_policy_bundles_tenant_active",
+        "policy_bundles",
+        ["tenant_id"],
+        unique=True,
+        postgresql_where=sa.text("is_active"),
     )
 
     op.get_bind().execute(
         sa.text(
-            "INSERT INTO policy_bundles (id, version, rules, is_active) "
-            "VALUES (gen_random_uuid(), :version, CAST(:rules AS jsonb), true) "
-            "ON CONFLICT (version) DO NOTHING"
+            "INSERT INTO policy_bundles (id, tenant_id, version, rules, is_active) "
+            "VALUES (gen_random_uuid(), 'tenant-1', :version, CAST(:rules AS jsonb), true) "
+            "ON CONFLICT (tenant_id, version) DO NOTHING"
         ),
         {"version": SEED_POLICY_BUNDLE_VERSION, "rules": json.dumps(SEED_POLICY_BUNDLE_RULES)},
     )
