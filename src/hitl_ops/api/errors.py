@@ -157,9 +157,11 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+        # Mutations carry idempotency keys, so a retry after an unexpected
+        # failure is replay-safe.
         return JSONResponse(
             status_code=500,
             content=error_payload(
-                "INTERNAL_ERROR", "Unexpected server error.", False, _correlation_id(request)
+                "INTERNAL_ERROR", "Unexpected server error.", True, _correlation_id(request)
             ),
         )
