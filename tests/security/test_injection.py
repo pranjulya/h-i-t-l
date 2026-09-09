@@ -38,6 +38,53 @@ def test_oversized_payloads_are_rejected(hardened_database) -> None:
     assert response.status_code in (413, 422)
 
 
+def test_chunked_and_headerless_oversized_bodies_are_rejected(hardened_database) -> None:
+    import httpx
+
+    settings = api_settings()
+    limit = settings.max_request_bytes
+    big_body = b'{"tool": "scale_service", "rationale": "' + b"x" * (limit + 1024) + b'"}'
+
+    def chunked() -> object:
+        for offset in range(0, len(big_body), 8192):
+            yield big_body[offset : offset + 8192]
+
+    token = bearer()["Authorization"]
+    with TestClient(create_app(settings)) as client:
+        # Chunked transfer encoding: no usable Content-Length.
+        chunked_response = client.post(
+            "/v1/intents",
+            content=chunked(),  # type: ignore[arg-type]
+            headers={
+                "Authorization": token,
+                "Idempotency-Key": "big-chunked",
+                "Content-Type": "application/json",
+            },
+        )
+        assert chunked_response.status_code == 413
+        assert chunked_response.json()["error"]["code"] == "PAYLOAD_TOO_LARGE"
+
+        # Missing Content-Length header entirely.
+        raw = httpx.Request(
+            "POST",
+            "/v1/intents",
+            content=big_body,
+            headers={
+                "Authorization": token,
+                "Idempotency-Key": "big-no-length",
+                "Content-Type": "application/json",
+            },
+        )
+        del raw.headers["content-length"]
+        headerless_response = client.request(
+            "POST",
+            raw.url.path,
+            content=raw.content,
+            headers=dict(raw.headers),
+        )
+        assert headerless_response.status_code == 413
+
+
 def test_prompt_injection_cannot_invent_tools_or_fields(hardened_database) -> None:
     import asyncio
 
