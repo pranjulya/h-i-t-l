@@ -143,7 +143,8 @@ async def create_agent_intent(
     idempotency_key: IdempotencyDep,
 ) -> dict[str, Any]:
     orchestrator: AgentOrchestrator = request.app.state.orchestrator
-    proposal = await orchestrator.propose(body.request, body.context_refs)
+    # Reserve idempotency before the billable provider call: retries and
+    # concurrent duplicates must not invoke the model more than once.
     idempotency = IdempotencyService(session)
     reservation = await idempotency.begin(
         tenant_id=actor.tenant_id,
@@ -161,6 +162,7 @@ async def create_agent_intent(
             http_status=409,
             retryable=True,
         )
+    proposal = await orchestrator.propose(body.request, body.context_refs)
     response = await create_intent_from_proposal(
         session,
         actor,
