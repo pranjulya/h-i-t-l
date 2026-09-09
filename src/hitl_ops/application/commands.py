@@ -10,7 +10,7 @@ every committed transition.
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from sqlalchemy import func, select
@@ -51,6 +51,7 @@ class ApprovalDecisionCommand:
     expected_state_version: int
     actor: AuthenticatedActor
     command_id: str
+    obligations: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +103,25 @@ async def _load_locked_intent(
         raise NotFoundError("intent revision not found")
     intent, db_now = row
     return intent, db_now
+
+
+def _required_role_for_level(
+    route: ApprovalRoute, level: int, required_roles: tuple[str, ...]
+) -> str | None:
+    """Bind the approval level to its specific role.
+
+    Critical two-step routes require ``critical_approver_l1`` for L1 and
+    ``critical_approver_l2`` for L2; a single-step route requires its sole
+    approval role for level 1. This prevents two differently named roles from
+    approving in the wrong level order.
+    """
+
+    if route is ApprovalRoute.CRITICAL_TWO_STEP:
+        index = level - 1
+        return required_roles[index] if 0 <= index < len(required_roles) else None
+    if level == 1 and required_roles:
+        return required_roles[0]
+    return None
 
 
 async def _next_sequence(session: AsyncSession, intent: ActionIntentORM) -> int:
@@ -201,6 +221,10 @@ class ApprovalCommandService:
                 reason_code="approval_ttl_elapsed",
                 db_now=db_now,
             )
+            # Commit the expiry transition durably: the API request transaction
+            # would otherwise roll it back when the error propagates, leaving a
+            # caller-visible expiry response with unexpired durable state.
+            await self._session.commit()
             raise ApprovalExpiredError("approval window elapsed")
 
         policy_row = (
@@ -217,8 +241,13 @@ class ApprovalCommandService:
         environment = intent.canonical_parameters.get("environment")
         roles = await current_roles(self._session, command.actor, environment)
         required_roles = tuple(policy_row.required_roles)
-        if not any(role in roles for role in required_roles):
-            raise ForbiddenError("actor does not hold a required approval role")
+        level_role = _required_role_for_level(route, command.level, required_roles)
+        if level_role is None or level_role not in roles:
+            raise ForbiddenError("actor does not hold the role required for this approval level")
+
+        if command.decision is ApprovalDecision.APPROVE:
+            self._enforce_scopes(command.actor.scopes, policy_row.required_scopes)
+            self._enforce_obligations(command.obligations, policy_row.obligations)
 
         if (
             command.decision is ApprovalDecision.APPROVE
@@ -238,7 +267,11 @@ class ApprovalCommandService:
                 decision=command.decision.value,
                 actor_id=command.actor.actor_id,
                 actor_roles_snapshot=actor_roles,
-                scope_snapshot={"environment": environment},
+                scope_snapshot={
+                    "environment": environment,
+                    "scopes": sorted(command.actor.scopes),
+                    "obligations": command.obligations,
+                },
                 reason=command.reason,
                 policy_version=policy_row.policy_version,
                 decided_at=db_now,
@@ -271,6 +304,22 @@ class ApprovalCommandService:
             )
         await self._session.flush()
         return _snapshot(intent)
+
+    def _enforce_scopes(self, actor_scopes: frozenset[str], required_scopes: list[str]) -> None:
+        missing = [scope for scope in required_scopes if scope not in actor_scopes]
+        if missing:
+            raise ForbiddenError(
+                f"actor does not hold required scopes: {', '.join(sorted(missing))}"
+            )
+
+    def _enforce_obligations(
+        self, provided: dict[str, str], required_obligations: list[str]
+    ) -> None:
+        missing = [name for name in required_obligations if not provided.get(name)]
+        if missing:
+            raise ForbiddenError(
+                f"mandatory obligations are not satisfied: {', '.join(sorted(missing))}"
+            )
 
     async def _resolve_target(
         self, intent: ActionIntentORM, route: ApprovalRoute, command: ApprovalDecisionCommand
