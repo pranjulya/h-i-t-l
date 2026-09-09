@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -38,17 +39,20 @@ def _healthy() -> FakeTargetQuery:
     return FakeTargetQuery(TargetSnapshot(found=True, health="healthy"))
 
 
-async def _claim(session, pending: dict, worker: str, **kwargs: object):
-    return await RevalidationService(session).claim_and_revalidate(
-        tenant_id="tenant-1",
-        intent_id=pending["intent_id"],
-        revision=1,
-        worker_id=worker,
-        command_id=uuid.uuid4().hex,
-        target_query=kwargs.get("target_query", _healthy()),
-        bundle=kwargs["bundle"],
-        lease_seconds=kwargs.get("lease_seconds", 60),
-    )
+async def _claim(maker, pending: dict, worker: str, **kwargs: object):
+    """claim_and_revalidate manages its own transactions; never wrap it."""
+
+    async with maker() as session:
+        return await RevalidationService(session).claim_and_revalidate(
+            tenant_id="tenant-1",
+            intent_id=pending["intent_id"],
+            revision=1,
+            worker_id=worker,
+            command_id=uuid.uuid4().hex,
+            target_query=kwargs.get("target_query", _healthy()),
+            bundle=kwargs["bundle"],
+            lease_seconds=kwargs.get("lease_seconds", 60),
+        )
 
 
 async def test_two_concurrent_claims_yield_one_permit(
@@ -65,13 +69,17 @@ async def test_two_concurrent_claims_yield_one_permit(
     async with maker() as session, session.begin():
         pending = await create_approved_intent(session, tool="restart_service", parameters=_RESTART)
 
-    async with maker() as first, first.begin():
-        permit = await _claim(first, pending, "worker-1", bundle=bundle)
-        assert permit.intent_digest == pending["digest"]
-        assert permit.precondition_token
-        async with maker() as second:
-            with pytest.raises(StateConflictError):
-                await _claim(second, pending, "worker-2", bundle=bundle)
+    # The first claim holds REVALIDATING while fetching; the second claim
+    # races it in parallel and exactly one wins the EXECUTING permit.
+    first, second = await asyncio.gather(
+        _claim(maker, pending, "worker-1", bundle=bundle),
+        _claim(maker, pending, "worker-2", bundle=bundle),
+        return_exceptions=True,
+    )
+    permits = [r for r in (first, second) if not isinstance(r, BaseException)]
+    conflicts = [r for r in (first, second) if isinstance(r, StateConflictError)]
+    assert len(permits) == 1
+    assert len(conflicts) == 1
 
     async with maker() as session, session.begin():
         count = (
@@ -82,6 +90,63 @@ async def test_two_concurrent_claims_yield_one_permit(
             )
         ).scalar_one()
         assert count == 1
+
+
+async def _lock_probe(maker, pending: dict) -> str:
+    """Attempt a nowait row lock; used to prove no lock is held during fetch."""
+
+    from sqlalchemy.exc import DBAPIError, OperationalError
+
+    async with maker() as session, session.begin():
+        try:
+            row = (
+                await session.execute(
+                    select(ActionIntentORM)
+                    .where(
+                        ActionIntentORM.tenant_id == "tenant-1",
+                        ActionIntentORM.intent_id == pending["intent_id"],
+                        ActionIntentORM.revision == 1,
+                    )
+                    .with_for_update(nowait=True)
+                )
+            ).first()
+            return "LOCK-ACQUIRED" if row else "NO-ROW"
+        except (OperationalError, DBAPIError):
+            return "LOCK-BLOCKED"
+
+
+async def test_target_fetch_holds_no_row_lock(migrated_database: str, engine: AsyncEngine) -> None:
+    """A hanging target fetch must not block a concurrent nowait row lock."""
+
+    from hitl_ops.domain.policy import (
+        SEED_POLICY_BUNDLE_RULES,
+        SEED_POLICY_BUNDLE_VERSION,
+        PolicyBundle,
+    )
+
+    bundle = PolicyBundle(version=SEED_POLICY_BUNDLE_VERSION, rules=SEED_POLICY_BUNDLE_RULES)
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        pending = await create_approved_intent(session, tool="restart_service", parameters=_RESTART)
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class HangingTarget:
+        async def fetch(self, tool: object, parameters: dict) -> TargetSnapshot:
+            started.set()
+            await release.wait()
+            return TargetSnapshot(found=True, health="healthy")
+
+    claim_task = asyncio.create_task(
+        _claim(maker, pending, "worker-1", bundle=bundle, target_query=HangingTarget())
+    )
+    await started.wait()
+    probe = await _lock_probe(maker, pending)
+    release.set()
+    result = await claim_task
+    assert probe == "LOCK-ACQUIRED", "row lock must not be held during the target fetch"
+    assert result is not None
 
 
 async def test_claim_requires_executable_state(migrated_database: str, engine: AsyncEngine) -> None:
@@ -100,9 +165,9 @@ async def test_claim_requires_executable_state(migrated_database: str, engine: A
         intent = await session.get(ActionIntentORM, ("tenant-1", pending["intent_id"], 1))
         assert intent is not None
         intent.state = IntentState.REJECTED.value
-    async with maker() as session, session.begin():
+    async with maker() as session:
         with pytest.raises(StateConflictError):
-            await _claim(session, pending, "worker-1", bundle=bundle)
+            await _claim(maker, pending, "worker-1", bundle=bundle)
 
 
 async def test_expired_claim_lease_is_retaken_not_duplicated(
@@ -131,8 +196,7 @@ async def test_expired_claim_lease_is_retaken_not_duplicated(
             )
         )
 
-    async with maker() as session, session.begin():
-        permit = await _claim(session, pending, "worker-2", bundle=bundle)
+    permit = await _claim(maker, pending, "worker-2", bundle=bundle)
     assert permit.operation_key == f"tenant-1:{pending['intent_id']}:1"
 
     async with maker() as session, session.begin():
@@ -172,8 +236,7 @@ async def test_one_byte_material_change_stales_the_claim(
             "strategy": "rolling",
         }
 
-    async with maker() as session, session.begin():
-        failure = await _claim(session, pending, "worker-1", bundle=bundle)
+    failure = await _claim(maker, pending, "worker-1", bundle=bundle)
     assert failure is not None
     assert failure.state is IntentState.STALE
     assert failure.reason_code == "digest_mismatch"
@@ -193,13 +256,12 @@ async def test_live_target_gates_stale_the_claim(
     async with maker() as session, session.begin():
         pending = await create_approved_intent(session, tool="restart_service", parameters=_RESTART)
 
-    async with maker() as session, session.begin():
-        failure = await _claim(
-            session,
-            pending,
-            "worker-1",
-            bundle=bundle,
-            target_query=FakeTargetQuery(TargetSnapshot(found=True, health="degraded")),
-        )
+    failure = await _claim(
+        maker,
+        pending,
+        "worker-1",
+        bundle=bundle,
+        target_query=FakeTargetQuery(TargetSnapshot(found=True, health="degraded")),
+    )
     assert failure is not None
     assert failure.reason_code == "target_degraded"

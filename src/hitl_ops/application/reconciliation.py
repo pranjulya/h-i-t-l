@@ -6,6 +6,7 @@ preserves UNKNOWN when evidence is insufficient, flagging operator escalation.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -15,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hitl_ops.adapters.base import AdapterResult
+from hitl_ops.application.revalidation import DEFAULT_STATUS_LOOKUP_TIMEOUT_SECONDS
 from hitl_ops.domain.enums import ExecutionOutcome, IntentState, ToolName
 from hitl_ops.domain.errors import NotFoundError, StateConflictError
 from hitl_ops.domain.intent import sanitize_raw_proposal
@@ -65,10 +67,13 @@ class ReconciliationService:
 
         provider_error: Exception | None = None
         try:
-            evidence: AdapterResult = await self._adapter.lookup_status(
-                ToolName(row.tool), execution.operation_key, execution.provider_operation_id
+            evidence: AdapterResult = await asyncio.wait_for(
+                self._adapter.lookup_status(
+                    ToolName(row.tool), execution.operation_key, execution.provider_operation_id
+                ),
+                timeout=DEFAULT_STATUS_LOOKUP_TIMEOUT_SECONDS,
             )
-        except Exception as exc:
+        except (TimeoutError, Exception) as exc:
             provider_error = exc
             evidence = AdapterResult(
                 outcome=ExecutionOutcome.UNKNOWN.value,

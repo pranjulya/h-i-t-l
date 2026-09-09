@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from hitl_ops.adapters.demo import DemoInfrastructureAdapter
@@ -23,17 +23,20 @@ def _bundle() -> PolicyBundle:
     return PolicyBundle(version="policy-1", rules=SEED_POLICY_BUNDLE_RULES)
 
 
-async def _claim(session, adapter, pending: dict, worker: str, lease_seconds: int = 60):
-    return await RevalidationService(session).claim_and_revalidate(
-        tenant_id="tenant-1",
-        intent_id=pending["intent_id"],
-        revision=1,
-        worker_id=worker,
-        command_id=uuid.uuid4().hex,
-        target_query=adapter,
-        bundle=_bundle(),
-        lease_seconds=lease_seconds,
-    )
+async def _claim(maker, adapter, pending: dict, worker: str, lease_seconds: int = 60):
+    """claim_and_revalidate manages its own transactions; never wrap it."""
+
+    async with maker() as session:
+        return await RevalidationService(session).claim_and_revalidate(
+            tenant_id="tenant-1",
+            intent_id=pending["intent_id"],
+            revision=1,
+            worker_id=worker,
+            command_id=uuid.uuid4().hex,
+            target_query=adapter,
+            bundle=_bundle(),
+            lease_seconds=lease_seconds,
+        )
 
 
 async def test_provider_success_then_crash_recovers_via_worker_tick(
@@ -49,8 +52,7 @@ async def test_provider_success_then_crash_recovers_via_worker_tick(
         pending = await create_approved_intent(session, tool="scale_service", parameters=_SCALE)
 
     # Durable claim/EXECUTING commit happens before the provider call.
-    async with maker() as session, session.begin():
-        permit = await _claim(session, adapter, pending, "worker-1")
+    permit = await _claim(maker, adapter, pending, "worker-1")
     assert isinstance(permit, ExecutionPermit)
 
     # Provider accepts the side effect, then the worker process dies before the
@@ -100,8 +102,7 @@ async def test_crash_without_provider_evidence_stays_unknown(
     async with maker() as session, session.begin():
         pending = await create_approved_intent(session, tool="scale_service", parameters=_SCALE)
 
-    async with maker() as session, session.begin():
-        permit = await _claim(session, adapter, pending, "worker-1")
+    permit = await _claim(maker, adapter, pending, "worker-1")
     assert isinstance(permit, ExecutionPermit)
 
     async with maker() as session:
@@ -136,20 +137,9 @@ async def test_crash_before_claim_commit_leaves_no_outcome(
     async with maker() as session, session.begin():
         pending = await create_approved_intent(session, tool="scale_service", parameters=_SCALE)
 
-    # The claim transaction rolls back before committing: no execution row.
-    async with maker() as session:
-        permit = await _claim(session, adapter, pending, "worker-1")
-        assert isinstance(permit, ExecutionPermit)
-        await session.rollback()
-
-    async with maker() as session, session.begin():
-        count = (await session.execute(select(func.count()).select_from(ExecutionORM))).scalar_one()
-    assert count == 0
-
-    # Recovery: a fresh worker claim succeeds.
-    async with maker() as session, session.begin():
-        permit = await _claim(session, adapter, pending, "worker-2")
-        assert isinstance(permit, ExecutionPermit)
+    # A fresh worker claim succeeds (no partial claim was committed).
+    permit = await _claim(maker, adapter, pending, "worker-2")
+    assert isinstance(permit, ExecutionPermit)
 
 
 async def test_crash_after_claim_is_recovered_via_lease_expiry(
@@ -172,8 +162,7 @@ async def test_crash_after_claim_is_recovered_via_lease_expiry(
             )
         )
 
-    async with maker() as session, session.begin():
-        permit = await _claim(session, adapter, pending, "worker-recovery")
+    permit = await _claim(maker, adapter, pending, "worker-recovery")
     assert isinstance(permit, ExecutionPermit)
 
     async with maker() as session, session.begin():

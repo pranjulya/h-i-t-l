@@ -33,16 +33,19 @@ def _bundle(**tool_rules: dict) -> PolicyBundle:
     )
 
 
-async def _claim(session, pending: dict, bundle: PolicyBundle):
-    return await RevalidationService(session).claim_and_revalidate(
-        tenant_id="tenant-1",
-        intent_id=pending["intent_id"],
-        revision=1,
-        worker_id="worker-1",
-        command_id=uuid.uuid4().hex,
-        target_query=HealthyTarget(),
-        bundle=bundle,
-    )
+async def _claim(maker, pending: dict, bundle: PolicyBundle):
+    """claim_and_revalidate manages its own transactions; never wrap it."""
+
+    async with maker() as session:
+        return await RevalidationService(session).claim_and_revalidate(
+            tenant_id="tenant-1",
+            intent_id=pending["intent_id"],
+            revision=1,
+            worker_id="worker-1",
+            command_id=uuid.uuid4().hex,
+            target_query=HealthyTarget(),
+            bundle=bundle,
+        )
 
 
 async def test_revoked_approver_is_observed_at_claim(
@@ -60,8 +63,7 @@ async def test_revoked_approver_is_observed_at_claim(
             .values(revoked_at=datetime.now(UTC) - timedelta(seconds=1))
         )
 
-    async with maker() as session, session.begin():
-        failure = await _claim(session, pending, _bundle())
+    failure = await _claim(maker, pending, _bundle())
     assert failure is not None
     assert failure.state is IntentState.STALE
     assert failure.reason_code == "approver_no_longer_authorized"
@@ -75,8 +77,7 @@ async def test_stricter_policy_is_observed_at_claim(
         pending = await create_approved_intent(session, tool="restart_service", parameters=_RESTART)
 
     stricter = _bundle(restart_service={"disposition": "BLOCK"})
-    async with maker() as session, session.begin():
-        failure = await _claim(session, pending, stricter)
+    failure = await _claim(maker, pending, stricter)
     assert failure is not None
     assert failure.state is IntentState.STALE
     assert failure.reason_code == "policy_now_blocks"
@@ -92,8 +93,7 @@ async def test_expired_approval_moves_to_expired_at_claim(
         assert intent is not None
         intent.approval_expires_at = datetime.now(UTC) - timedelta(seconds=1)
 
-    async with maker() as session, session.begin():
-        failure = await _claim(session, pending, _bundle())
+    failure = await _claim(maker, pending, _bundle())
     assert failure is not None
     assert failure.state is IntentState.EXPIRED
     assert failure.reason_code == "approval_ttl_elapsed"
@@ -108,8 +108,7 @@ async def test_equal_policy_and_current_authorization_proceed(
     async with maker() as session, session.begin():
         pending = await create_approved_intent(session, tool="restart_service", parameters=_RESTART)
 
-    async with maker() as session, session.begin():
-        result = await _claim(session, pending, _bundle())
+    result = await _claim(maker, pending, _bundle())
     assert isinstance(result, ExecutionPermit)
     assert result.tool == "restart_service"
 
@@ -130,8 +129,7 @@ async def test_role_scope_change_is_observed_at_claim(
             .values(environments=["production"])
         )
 
-    async with maker() as session, session.begin():
-        failure = await _claim(session, pending, _bundle())
+    failure = await _claim(maker, pending, _bundle())
     assert failure is not None
     assert failure.reason_code == "approver_no_longer_authorized"
 
@@ -146,8 +144,7 @@ async def test_expiry_error_is_not_raised_by_claim(
         assert intent is not None
         intent.approval_expires_at = datetime.now(UTC) - timedelta(seconds=1)
 
-    async with maker() as session, session.begin():
-        failure = await _claim(session, pending, _bundle())
+    failure = await _claim(maker, pending, _bundle())
     assert failure is not None
     assert failure.state is IntentState.EXPIRED
     assert failure.reason_code == "approval_ttl_elapsed"
@@ -197,8 +194,7 @@ async def test_l1_actor_losing_l1_and_gaining_l2_stales_the_claim(
             )
         )
 
-    async with maker() as session, session.begin():
-        failure = await _claim(session, pending, _bundle())
+    failure = await _claim(maker, pending, _bundle())
     assert failure is not None
     assert failure.state is IntentState.STALE
     assert failure.reason_code == "approver_no_longer_authorized"
