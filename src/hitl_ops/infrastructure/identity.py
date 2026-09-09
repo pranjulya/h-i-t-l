@@ -23,6 +23,7 @@ class AuthenticatedActor:
     actor_id: str
     tenant_id: str
     correlation_id: str
+    scopes: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if not self.actor_id or not self.tenant_id:
@@ -59,9 +60,21 @@ def validate_token(
     if not isinstance(tenant, str) or not tenant:
         raise IdentityValidationError("token must carry a tenant claim")
     correlation = claims.get("correlation_id", "")
+    scopes = _parse_scopes(claims.get("scope", claims.get("scopes", "")))
     return AuthenticatedActor(
-        actor_id=str(claims["sub"]), tenant_id=tenant, correlation_id=str(correlation)
+        actor_id=str(claims["sub"]),
+        tenant_id=tenant,
+        correlation_id=str(correlation),
+        scopes=scopes,
     )
+
+
+def _parse_scopes(raw: object) -> frozenset[str]:
+    if isinstance(raw, str):
+        return frozenset(part for part in raw.split() if part)
+    if isinstance(raw, (list, tuple)):
+        return frozenset(str(part) for part in raw if part)
+    return frozenset()
 
 
 @dataclass(frozen=True, slots=True)

@@ -20,7 +20,12 @@ _RESTART = {"environment": "staging", "service": "payments-api", "strategy": "ro
 
 
 def _actor(actor_id: str) -> AuthenticatedActor:
-    return AuthenticatedActor(actor_id=actor_id, tenant_id="tenant-1", correlation_id="corr-1")
+    return AuthenticatedActor(
+        actor_id=actor_id,
+        tenant_id="tenant-1",
+        correlation_id="corr-1",
+        scopes=frozenset({"ops:write", "ops:read"}),
+    )
 
 
 def _command(pending: dict) -> ApprovalDecisionCommand:
@@ -35,6 +40,7 @@ def _command(pending: dict) -> ApprovalDecisionCommand:
         expected_state_version=pending["expected_state_version"],
         actor=_actor("approver-1"),
         command_id=uuid.uuid4().hex,
+        obligations={"announce_in_incident_channel": "inc-123"},
     )
 
 

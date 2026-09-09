@@ -148,19 +148,26 @@ class AdministrationService:
 
     async def register_policy_bundle(self, command: RegisterPolicyBundleCommand) -> str:
         await require_administrator(self._session, command.actor)
+        tenant_id = command.actor.tenant_id
         existing = (
             await self._session.execute(
-                select(PolicyBundleORM).where(PolicyBundleORM.version == command.version)
+                select(PolicyBundleORM).where(
+                    PolicyBundleORM.tenant_id == tenant_id,
+                    PolicyBundleORM.version == command.version,
+                )
             )
         ).scalar_one_or_none()
         if existing is not None:
-            raise ForbiddenError("policy bundle version already registered")
-        row = PolicyBundleORM(version=command.version, rules=command.rules, is_active=False)
+            raise ForbiddenError("policy bundle version already registered for this tenant")
+        row = PolicyBundleORM(
+            tenant_id=tenant_id, version=command.version, rules=command.rules, is_active=False
+        )
         self._session.add(row)
         _audit(
             self._session,
             "administration.policy_changed",
             {
+                "tenant_id": tenant_id,
                 "policy_version": command.version,
                 "action": "registered",
                 "actor_id": command.actor.actor_id,
@@ -173,16 +180,23 @@ class AdministrationService:
 
     async def activate_policy_bundle(self, command: ActivatePolicyBundleCommand) -> str:
         await require_administrator(self._session, command.actor)
+        tenant_id = command.actor.tenant_id
         target = (
             await self._session.execute(
-                select(PolicyBundleORM).where(PolicyBundleORM.version == command.version)
+                select(PolicyBundleORM).where(
+                    PolicyBundleORM.tenant_id == tenant_id,
+                    PolicyBundleORM.version == command.version,
+                )
             )
         ).scalar_one_or_none()
         if target is None:
             raise NotFoundError("policy bundle version not found")
         await self._session.execute(
             update(PolicyBundleORM)
-            .where(PolicyBundleORM.is_active.is_(True))
+            .where(
+                PolicyBundleORM.tenant_id == tenant_id,
+                PolicyBundleORM.is_active.is_(True),
+            )
             .values(is_active=False)
         )
         target.is_active = True
@@ -190,6 +204,7 @@ class AdministrationService:
             self._session,
             "administration.policy_changed",
             {
+                "tenant_id": tenant_id,
                 "policy_version": command.version,
                 "action": "activated",
                 "actor_id": command.actor.actor_id,

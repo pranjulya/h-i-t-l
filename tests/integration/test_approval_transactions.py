@@ -26,8 +26,13 @@ from tests.integration.conftest import create_pending_intent, grant_role_directl
 _RESTART = {"environment": "staging", "service": "payments-api", "strategy": "rolling"}
 
 
+_APPROVER_SCOPES = frozenset({"ops:write", "ops:read"})
+
+
 def _actor(actor_id: str, tenant_id: str = "tenant-1") -> AuthenticatedActor:
-    return AuthenticatedActor(actor_id=actor_id, tenant_id=tenant_id, correlation_id="corr-1")
+    return AuthenticatedActor(
+        actor_id=actor_id, tenant_id=tenant_id, correlation_id="corr-1", scopes=_APPROVER_SCOPES
+    )
 
 
 def _decide_command(
@@ -44,6 +49,10 @@ def _decide_command(
         "expected_state_version": pending["expected_state_version"],
         "actor": actor,
         "command_id": uuid.uuid4().hex,
+        "obligations": {
+            "announce_in_incident_channel": "inc-123",
+            "require_change_ticket": "CHG-123",
+        },
     }
     values.update(overrides)
     return ApprovalDecisionCommand(**values)  # type: ignore[arg-type]
@@ -377,3 +386,68 @@ async def test_partial_unique_index_blocks_duplicate_approvals(
         with pytest.raises(IntegrityError):
             await session.flush()
         await session.rollback()
+
+
+async def test_approval_without_required_scope_is_forbidden(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        await grant_role_directly(session, "tenant-1", "approver-1", "approver")
+        pending = await create_pending_intent(session, tool="restart_service", parameters=_RESTART)
+
+    actor = AuthenticatedActor(
+        actor_id="approver-1", tenant_id="tenant-1", correlation_id="corr-1", scopes=frozenset()
+    )
+    async with maker() as session, session.begin():
+        with pytest.raises(ForbiddenError):
+            await ApprovalCommandService(session).decide(_decide_command(pending, actor))
+
+
+async def test_approval_without_required_obligation_is_forbidden(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        await grant_role_directly(session, "tenant-1", "approver-1", "approver")
+        pending = await create_pending_intent(session, tool="restart_service", parameters=_RESTART)
+
+    async with maker() as session, session.begin():
+        with pytest.raises(ForbiddenError):
+            await ApprovalCommandService(session).decide(
+                _decide_command(pending, _actor("approver-1"), obligations={})
+            )
+
+
+async def test_l1_role_cannot_approve_level_2(migrated_database: str, engine: AsyncEngine) -> None:
+    maker = build_sessionmaker(engine)
+    delete_params = {
+        "environment": "staging",
+        "resource_type": "postgres_instance",
+        "resource_id": "pg-main-2",
+        "deletion_mode": "hard",
+    }
+    async with maker() as session, session.begin():
+        await grant_role_directly(session, "tenant-1", "l1-user", "critical_approver_l1")
+        pending = await create_pending_intent(
+            session, tool="delete_resource", parameters=delete_params, requester_id="user-1"
+        )
+
+    async with maker() as session, session.begin():
+        snapshot = await ApprovalCommandService(session).decide(
+            _decide_command(pending, _actor("l1-user"), level=1)
+        )
+    assert snapshot.state is IntentState.PENDING_APPROVAL_2
+
+    # l1-user holds only the L1 role; the L2 decision must be forbidden even
+    # though the required-roles list contains both role names.
+    async with maker() as session, session.begin():
+        with pytest.raises(ForbiddenError):
+            await ApprovalCommandService(session).decide(
+                _decide_command(
+                    pending,
+                    _actor("l1-user"),
+                    level=2,
+                    expected_state_version=snapshot.state_version,
+                )
+            )

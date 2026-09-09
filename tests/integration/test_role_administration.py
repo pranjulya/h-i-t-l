@@ -171,7 +171,7 @@ async def test_policy_bundle_lifecycle_is_administrator_gated(
             )
 
     async with maker() as session, session.begin():
-        active = await PolicyBundleRepository(session).get_active()
+        active = await PolicyBundleRepository(session).get_active("tenant-1")
         assert active is not None and active.version == "policy-1"
 
     async with maker() as session, session.begin():
@@ -185,7 +185,7 @@ async def test_policy_bundle_lifecycle_is_administrator_gated(
         )
 
     async with maker() as session, session.begin():
-        active = await PolicyBundleRepository(session).get_active()
+        active = await PolicyBundleRepository(session).get_active("tenant-1")
         assert active is not None
         assert active.version == "policy-2"
         assert isinstance(active, PolicyBundle)
