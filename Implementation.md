@@ -32,7 +32,7 @@ When documents disagree: PRD product rules → approval state machine legal tran
 | Phase | Deliverable | Depends on | Status |
 |---:|---|---|---|
 | 00 | Repository and application foundation | User approval | TESTED |
-| 01 | Immutable intent domain and PostgreSQL persistence | 00 | NOT_STARTED |
+| 01 | Immutable intent domain and PostgreSQL persistence | 00 | TESTED |
 | 02 | Risk and policy evaluation | 01 | NOT_STARTED |
 | 03 | Approval state machine, OIDC/RBAC, expiry | 02 | NOT_STARTED |
 | 04 | Revalidation, concurrency, idempotency | 03 | NOT_STARTED |
