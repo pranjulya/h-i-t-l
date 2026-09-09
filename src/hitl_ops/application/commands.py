@@ -21,6 +21,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import DBAPIError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -441,7 +442,45 @@ class IdempotencyService:
     ) -> IdempotencyReservation:
         key_hash = idempotency_key_hash(key)
         request_hash = canonical_request_hash(request_payload)
-        existing = (
+        existing = await self._lookup(tenant_id, actor_id, scope, key_hash)
+        if existing is not None:
+            return self._reservation_from(existing, request_hash)
+
+        inserted_id = (
+            await self._session.execute(
+                insert(IdempotencyRecordORM)
+                .values(
+                    tenant_id=tenant_id,
+                    actor_id=actor_id,
+                    scope=scope,
+                    key_hash=key_hash,
+                    request_hash=request_hash,
+                    status="PENDING",
+                    expires_at=expires_at,
+                )
+                .on_conflict_do_nothing(
+                    constraint="uq_idempotency_records_key",
+                )
+                .returning(IdempotencyRecordORM.id)
+            )
+        ).scalar_one_or_none()
+        if inserted_id is not None:
+            return IdempotencyReservation(
+                replayed=False, pending=False, response_status=None, response_body=None
+            )
+        # A concurrent request won the race during the insert; re-read and
+        # convert that into the stable contract rather than a raw conflict.
+        existing = await self._lookup(tenant_id, actor_id, scope, key_hash)
+        if existing is not None:
+            return self._reservation_from(existing, request_hash)
+        return IdempotencyReservation(
+            replayed=False, pending=False, response_status=None, response_body=None
+        )
+
+    async def _lookup(
+        self, tenant_id: str, actor_id: str, scope: str, key_hash: str
+    ) -> IdempotencyRecordORM | None:
+        return (
             await self._session.execute(
                 select(IdempotencyRecordORM).where(
                     IdempotencyRecordORM.tenant_id == tenant_id,
@@ -451,33 +490,21 @@ class IdempotencyService:
                 )
             )
         ).scalar_one_or_none()
-        if existing is not None:
-            if existing.request_hash != request_hash:
-                raise IdempotencyConflictError("idempotency key reused with different request")
-            if existing.status == "COMPLETED":
-                return IdempotencyReservation(
-                    replayed=True,
-                    pending=False,
-                    response_status=existing.response_status,
-                    response_body=existing.response_body,
-                )
+
+    def _reservation_from(
+        self, existing: IdempotencyRecordORM, request_hash: str
+    ) -> IdempotencyReservation:
+        if existing.request_hash != request_hash:
+            raise IdempotencyConflictError("idempotency key reused with different request")
+        if existing.status == "COMPLETED":
             return IdempotencyReservation(
-                replayed=True, pending=True, response_status=None, response_body=None
+                replayed=True,
+                pending=False,
+                response_status=existing.response_status,
+                response_body=existing.response_body,
             )
-        self._session.add(
-            IdempotencyRecordORM(
-                tenant_id=tenant_id,
-                actor_id=actor_id,
-                scope=scope,
-                key_hash=key_hash,
-                request_hash=request_hash,
-                status="PENDING",
-                expires_at=expires_at,
-            )
-        )
-        await self._session.flush()
         return IdempotencyReservation(
-            replayed=False, pending=False, response_status=None, response_body=None
+            replayed=True, pending=True, response_status=None, response_body=None
         )
 
     async def complete(

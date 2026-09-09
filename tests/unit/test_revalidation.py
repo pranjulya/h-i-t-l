@@ -9,6 +9,7 @@ from hitl_ops.application.revalidation import (
     check_preconditions,
     is_stricter,
     operation_key_for,
+    policy_stricter,
     recompute_digest,
     route_stricter,
 )
@@ -92,3 +93,38 @@ async def test_denying_target_query_fails_closed() -> None:
     snapshot = await DenyingTargetQuery().fetch("scale_service", {})  # type: ignore[arg-type]
     assert snapshot.found is False
     assert check_preconditions("scale_service", {}, snapshot) == "target_missing"
+
+
+def test_missing_identity_field_fails_closed() -> None:
+    # The approved intent names an exact service, but the live snapshot omits
+    # that identity field entirely: this must be treated as a replaced target.
+    snapshot = TargetSnapshot(found=True, identity={}, health="healthy")
+    assert check_preconditions("scale_service", {"service": "api"}, snapshot) == "target_replaced"
+
+
+def test_policy_stricter_detects_same_route_tightening() -> None:
+    from types import SimpleNamespace
+
+    from hitl_ops.domain.enums import PolicyDisposition
+
+    def policy(**overrides: object) -> object:
+        base: dict = {
+            "disposition": PolicyDisposition.REQUIRE_APPROVAL,
+            "route": ApprovalRoute.SINGLE,
+            "required_roles": ["approver"],
+            "required_scopes": ["ops:write"],
+            "obligations": [],
+            "approval_ttl_seconds": 900,
+        }
+        base.update(overrides)
+        return SimpleNamespace(**base)
+
+    original = policy()
+    assert not policy_stricter(policy(), original)
+
+    # Additional required scope under the same route stales.
+    assert policy_stricter(policy(required_scopes=["ops:write", "ops:read"]), original)
+    # Additional obligation under the same route stales.
+    assert policy_stricter(policy(obligations=["require_change_ticket"]), original)
+    # Shorter approval TTL under the same route stales.
+    assert policy_stricter(policy(approval_ttl_seconds=300), original)

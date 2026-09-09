@@ -5,14 +5,12 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-import pytest
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from hitl_ops.adapters.base import TargetSnapshot
 from hitl_ops.application.revalidation import RevalidationService
 from hitl_ops.domain.enums import IntentState
-from hitl_ops.domain.errors import ApprovalExpiredError
 from hitl_ops.domain.policy import SEED_POLICY_BUNDLE_RULES, PolicyBundle
 from hitl_ops.infrastructure.database import build_sessionmaker
 from hitl_ops.infrastructure.orm import ActionIntentORM, RoleAssignmentORM
@@ -144,5 +142,12 @@ async def test_expiry_error_is_not_raised_by_claim(
     maker = build_sessionmaker(engine)
     async with maker() as session, session.begin():
         pending = await create_approved_intent(session, tool="restart_service", parameters=_RESTART)
-    with pytest.raises(ApprovalExpiredError):
-        raise ApprovalExpiredError("sanity: error type exists")
+        intent = await session.get(ActionIntentORM, ("tenant-1", pending["intent_id"], 1))
+        assert intent is not None
+        intent.approval_expires_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    async with maker() as session, session.begin():
+        failure = await _claim(session, pending, _bundle())
+    assert failure is not None
+    assert failure.state is IntentState.EXPIRED
+    assert failure.reason_code == "approval_ttl_elapsed"
