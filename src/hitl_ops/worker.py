@@ -2,6 +2,11 @@
 
 Worker identity and network access are separate from API/agent components.
 The tick is bounded; a scheduler (compose command or CI job) drives it.
+
+The durable claim/``EXECUTING`` transition commits in its own transaction
+*before* the provider call. A provider side effect followed by a worker crash
+therefore leaves a durable ``EXECUTING`` claim that reconciliation can resolve,
+instead of rolling the claim back and re-sending the same operation.
 """
 
 from __future__ import annotations
@@ -14,10 +19,10 @@ from sqlalchemy import select
 from hitl_ops.adapters.base import DenyingTargetQuery, InfrastructureAdapter
 from hitl_ops.application.execution import ExecutionService
 from hitl_ops.application.reconciliation import ReconciliationService
-from hitl_ops.application.revalidation import RevalidationService
+from hitl_ops.application.revalidation import ExecutionPermit, RevalidationService
 from hitl_ops.domain.enums import IntentState
 from hitl_ops.domain.errors import DomainError, StateConflictError
-from hitl_ops.infrastructure.orm import ActionIntentORM
+from hitl_ops.infrastructure.orm import ActionIntentORM, ExecutionORM
 from hitl_ops.infrastructure.repositories import PolicyBundleRepository
 
 _EXECUTABLE_STATES = (IntentState.AUTO_APPROVED.value, IntentState.APPROVED.value)
@@ -29,11 +34,6 @@ async def run_worker_tick(session_factory: Any, adapter: InfrastructureAdapter) 
     """One bounded worker pass: execute eligible intents, reconcile unknowns."""
 
     stats = {"executed": 0, "reconciled": 0, "skipped": 0}
-
-    async with session_factory() as session:
-        bundle = await PolicyBundleRepository(session).get_active()
-    if bundle is None:
-        return stats
 
     # Snapshot unknowns before executing: reconciliation is a separate pass and
     # must not immediately resolve what this same tick just marked unknown.
@@ -61,36 +61,19 @@ async def run_worker_tick(session_factory: Any, adapter: InfrastructureAdapter) 
 
     for tenant_id, intent_id, revision in eligible:
         command_id = uuid.uuid4().hex
-        try:
-            async with session_factory() as session, session.begin():
-                revalidation = RevalidationService(session)
-                permit = await revalidation.claim_and_revalidate(
-                    tenant_id=tenant_id,
-                    intent_id=intent_id,
-                    revision=revision,
-                    worker_id="execution-worker",
-                    command_id=command_id,
-                    target_query=_target_query_for(adapter),
-                    bundle=bundle,
-                )
-                from hitl_ops.application.revalidation import ExecutionPermit
-
-                if not isinstance(permit, ExecutionPermit):
-                    stats["skipped"] += 1
-                    continue
-                executor = ExecutionService(session, adapter)
-                await executor.execute_permit(
-                    permit, worker_id="execution-worker", command_id=command_id
-                )
-                stats["executed"] += 1
-        except StateConflictError:
+        permit = await _claim(session_factory, adapter, tenant_id, intent_id, revision, command_id)
+        if permit is None:
+            stats["skipped"] += 1
+            continue
+        executed = await _execute(session_factory, adapter, permit, command_id)
+        if executed:
+            stats["executed"] += 1
+        else:
             stats["skipped"] += 1
 
     for tenant_id, intent_id, revision in pending_unknowns:
         command_id = uuid.uuid4().hex
         async with session_factory() as session, session.begin():
-            from hitl_ops.infrastructure.orm import ExecutionORM
-
             execution_id = (
                 await session.execute(
                     select(ExecutionORM.id).where(
@@ -111,6 +94,57 @@ async def run_worker_tick(session_factory: Any, adapter: InfrastructureAdapter) 
             except DomainError:
                 stats["skipped"] += 1
     return stats
+
+
+async def _claim(
+    session_factory: Any,
+    adapter: InfrastructureAdapter,
+    tenant_id: str,
+    intent_id: Any,
+    revision: int,
+    command_id: str,
+) -> ExecutionPermit | None:
+    """Claim and revalidate, committing the EXECUTING state durably."""
+
+    try:
+        async with session_factory() as session, session.begin():
+            bundle = await PolicyBundleRepository(session).get_active(tenant_id)
+            if bundle is None:
+                return None
+            revalidation = RevalidationService(session)
+            permit = await revalidation.claim_and_revalidate(
+                tenant_id=tenant_id,
+                intent_id=intent_id,
+                revision=revision,
+                worker_id="execution-worker",
+                command_id=command_id,
+                target_query=_target_query_for(adapter),
+                bundle=bundle,
+            )
+            if not isinstance(permit, ExecutionPermit):
+                return None
+            return permit
+    except StateConflictError:
+        return None
+
+
+async def _execute(
+    session_factory: Any,
+    adapter: InfrastructureAdapter,
+    permit: ExecutionPermit,
+    command_id: str,
+) -> bool:
+    """Invoke the provider and persist the outcome in a fresh transaction."""
+
+    try:
+        async with session_factory() as session, session.begin():
+            executor = ExecutionService(session, adapter)
+            await executor.execute_permit(
+                permit, worker_id="execution-worker", command_id=command_id
+            )
+        return True
+    except StateConflictError:
+        return False
 
 
 def _target_query_for(adapter: InfrastructureAdapter) -> Any:

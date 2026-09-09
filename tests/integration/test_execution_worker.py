@@ -74,15 +74,6 @@ async def test_worker_performs_at_most_one_provider_operation(
             )
         ).scalar_one()
         assert executions == 1
-    provider_ops = (
-        [
-            key
-            for key, record in adapter._operations.items()
-            if record["intent"] == str(pending["intent_id"])
-        ]
-        if False
-        else None
-    )
     # The demo adapter records one operation per unique operation key.
     matching = [key for key in adapter._operations if str(pending["intent_id"]) in key]
     assert len(matching) == 1

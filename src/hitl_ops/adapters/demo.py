@@ -35,12 +35,14 @@ class DemoInfrastructureAdapter:
         self._operations: dict[str, dict[str, Any]] = {}
 
     async def fetch(self, tool: ToolName, parameters: dict[str, Any]) -> TargetSnapshot:
-        identity_key = (
-            parameters.get("service") or parameters.get("name") or parameters.get("resource_id")
-        )
+        identity = {
+            field: parameters[field]
+            for field in ("service", "name", "resource_id")
+            if parameters.get(field) is not None
+        }
         return TargetSnapshot(
             found=True,
-            identity={"identity": identity_key},
+            identity=identity,
             health="healthy",
             facts={},
         )
