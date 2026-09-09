@@ -1,9 +1,11 @@
-"""audit events and outbox delivery
+"""audit events, outbox delivery, and domain check constraints
 
 Revision ID: 0006
 Revises: 0005
 Create Date: 2026-09-08
 
+Adds the audit/outbox tables plus database check constraints for approval
+level, decision, state versioning, and execution status/revision guards.
 """
 
 from collections.abc import Sequence
@@ -85,8 +87,47 @@ def upgrade() -> None:
         )
     )
 
+    op.create_check_constraint(
+        "ck_action_intents_state_version_positive",
+        "action_intents",
+        sa.text("state_version >= 1"),
+    )
+    op.create_check_constraint(
+        "ck_approval_decisions_level", "approval_decisions", sa.text("level IN (1, 2)")
+    )
+    op.create_check_constraint(
+        "ck_approval_decisions_decision",
+        "approval_decisions",
+        sa.text("decision IN ('APPROVE', 'REJECT')"),
+    )
+    op.create_check_constraint(
+        "ck_approval_decisions_revision_positive",
+        "approval_decisions",
+        sa.text("intent_revision >= 1"),
+    )
+    op.create_check_constraint(
+        "ck_executions_attempt_positive", "executions", sa.text("attempt >= 1")
+    )
+    op.create_check_constraint(
+        "ck_executions_revision_positive", "executions", sa.text("intent_revision >= 1")
+    )
+    op.create_check_constraint(
+        "ck_executions_status",
+        "executions",
+        sa.text("status IN ('CLAIMED', 'EXECUTING', 'SUCCEEDED', 'FAILED', 'UNKNOWN')"),
+    )
+
 
 def downgrade() -> None:
+    op.drop_constraint("ck_executions_status", "executions", type_="check")
+    op.drop_constraint("ck_executions_revision_positive", "executions", type_="check")
+    op.drop_constraint("ck_executions_attempt_positive", "executions", type_="check")
+    op.drop_constraint(
+        "ck_approval_decisions_revision_positive", "approval_decisions", type_="check"
+    )
+    op.drop_constraint("ck_approval_decisions_decision", "approval_decisions", type_="check")
+    op.drop_constraint("ck_approval_decisions_level", "approval_decisions", type_="check")
+    op.drop_constraint("ck_action_intents_state_version_positive", "action_intents", type_="check")
     op.execute(sa.text("DROP TRIGGER IF EXISTS trg_audit_events_immutable ON audit_events"))
     op.execute(sa.text("DROP FUNCTION IF EXISTS audit_events_immutable()"))
     op.drop_index("uq_audit_events_causation", table_name="audit_events")

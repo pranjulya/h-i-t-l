@@ -16,6 +16,7 @@ from hitl_ops.application.commands import (
     IdempotencyService,
 )
 from hitl_ops.domain.enums import ApprovalDecision
+from hitl_ops.domain.errors import ApprovalExpiredError, DomainError
 from hitl_ops.domain.models import IntentSnapshot
 
 router = APIRouter(prefix="/v1")
@@ -68,23 +69,50 @@ async def decide_approval(
         request_payload={"intent_id": str(intent_id), **body.model_dump()},
     )
     if reservation.replayed and reservation.response_body is not None:
+        if reservation.response_status and reservation.response_status >= 400:
+            raise DomainError(
+                str(reservation.response_body.get("message", "replayed error")),
+                code=str(reservation.response_body.get("code", "DOMAIN_ERROR")),
+                http_status=reservation.response_status,
+            )
         return reservation.response_body
-    service = ApprovalCommandService(session)
-    snapshot = await service.decide(
-        ApprovalDecisionCommand(
-            tenant_id=actor.tenant_id,
-            intent_id=intent_id,
-            revision=body.revision,
-            intent_digest=body.intent_digest,
-            level=body.level,
-            decision=ApprovalDecision(body.decision),
-            reason=body.reason,
-            expected_state_version=body.expected_state_version,
-            actor=actor,
-            command_id=uuid.uuid4().hex,
-            obligations=body.obligations,
+    if reservation.replayed and reservation.pending:
+        raise DomainError(
+            "an identical command is still in progress",
+            code="STATE_CONFLICT",
+            http_status=409,
+            retryable=True,
         )
-    )
+    service = ApprovalCommandService(session)
+    try:
+        snapshot = await service.decide(
+            ApprovalDecisionCommand(
+                tenant_id=actor.tenant_id,
+                intent_id=intent_id,
+                revision=body.revision,
+                intent_digest=body.intent_digest,
+                level=body.level,
+                decision=ApprovalDecision(body.decision),
+                reason=body.reason,
+                expected_state_version=body.expected_state_version,
+                actor=actor,
+                command_id=uuid.uuid4().hex,
+                obligations=body.obligations,
+            )
+        )
+    except ApprovalExpiredError as exc:
+        # The EXPIRED transition commits with the caller's commit below.
+        # Record the error outcome atomically so a same-key/same-body retry
+        # replays it instead of re-entering the decision path.
+        await idempotency.complete(
+            tenant_id=actor.tenant_id,
+            actor_id=actor.actor_id,
+            scope="approvals",
+            key=idempotency_key,
+            response_status=exc.http_status,
+            response_body={"code": exc.code, "message": exc.message},
+        )
+        raise
     response = _snapshot(snapshot)
     await idempotency.complete(
         tenant_id=actor.tenant_id,
@@ -115,6 +143,13 @@ async def cancel_intent(
     )
     if reservation.replayed and reservation.response_body is not None:
         return reservation.response_body
+    if reservation.replayed and reservation.pending:
+        raise DomainError(
+            "an identical command is still in progress",
+            code="STATE_CONFLICT",
+            http_status=409,
+            retryable=True,
+        )
     service = ApprovalCommandService(session)
     snapshot = await service.cancel(
         CancelIntentCommand(
