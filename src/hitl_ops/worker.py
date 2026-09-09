@@ -5,8 +5,9 @@ The tick is bounded; a scheduler (compose command or CI job) drives it.
 
 The durable claim/``EXECUTING`` transition commits in its own transaction
 *before* the provider call. A provider side effect followed by a worker crash
-therefore leaves a durable ``EXECUTING`` claim that reconciliation can resolve,
-instead of rolling the claim back and re-sending the same operation.
+therefore leaves a durable ``EXECUTING`` claim that recovery moves to
+``EXECUTION_UNKNOWN`` (never a blind resend) and reconciles from provider
+evidence, instead of rolling the claim back and re-sending the operation.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import uuid
 from typing import Any
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 from hitl_ops.adapters.base import DenyingTargetQuery, InfrastructureAdapter
 from hitl_ops.application.execution import ExecutionService
@@ -25,13 +27,22 @@ from hitl_ops.application.reconciliation import (
 from hitl_ops.application.revalidation import ExecutionPermit, RevalidationService
 from hitl_ops.domain.enums import IntentState
 from hitl_ops.domain.errors import DomainError, StateConflictError
+from hitl_ops.domain.state_machine import require_transition
 from hitl_ops.infrastructure.notification import LoggingNotificationSink
-from hitl_ops.infrastructure.orm import ActionIntentORM, ExecutionORM
+from hitl_ops.infrastructure.orm import (
+    ActionIntentORM,
+    ExecutionORM,
+    OutboxMessageORM,
+    StateTransitionORM,
+)
 from hitl_ops.infrastructure.outbox import OutboxPublisher
 from hitl_ops.infrastructure.repositories import PolicyBundleRepository
 
 _EXECUTABLE_STATES = (IntentState.AUTO_APPROVED.value, IntentState.APPROVED.value)
 _TICK_LIMIT = 5
+# A crashed worker leaves EXECUTING with an expired lease; recovery moves it to
+# EXECUTION_UNKNOWN without resending and reconciles from provider evidence.
+RECOVERY_LEASE_SECONDS = 60
 
 
 async def run_worker_tick(
@@ -93,6 +104,9 @@ async def run_worker_tick(
             stats["executed"] += 1
         else:
             stats["skipped"] += 1
+
+    recovered = await _recover_stale_executing(session_factory)
+    stats["recovered"] = recovered
 
     for execution_id in pending_unknowns:
         command_id = uuid.uuid4().hex
@@ -165,6 +179,115 @@ async def _execute(
         return True
     except StateConflictError:
         return False
+
+
+async def _recover_stale_executing(
+    session_factory: Any,
+    lease_seconds: int = RECOVERY_LEASE_SECONDS,
+) -> int:
+    """Move expired EXECUTING leases to EXECUTION_UNKNOWN without resending.
+
+    Exactly one recovery worker wins each execution: the move requires the
+    intent row lock plus an atomic status change from EXECUTING with an
+    expired lease. Reconciliation is not performed here: this path only
+    schedules the execution, and the single scheduler in run_worker_tick
+    reconciles it from provider evidence, so an unresolved provider is not
+    polled twice per tick.
+    """
+
+    recovered = 0
+    lease_expiry = func.coalesce(
+        ExecutionORM.claim_expires_at, ExecutionORM.started_at
+    ) + func.make_interval(0, 0, 0, 0, 0, 0, lease_seconds)
+    async with session_factory() as session:
+        candidates = (
+            await session.execute(
+                select(
+                    ExecutionORM.id,
+                    ExecutionORM.tenant_id,
+                    ExecutionORM.intent_id,
+                    ExecutionORM.intent_revision,
+                )
+                .where(
+                    ExecutionORM.status == "EXECUTING",
+                    lease_expiry <= func.now(),
+                )
+                .limit(_TICK_LIMIT)
+            )
+        ).all()
+    for execution_id, tenant_id, intent_id, revision in candidates:
+        command_id = uuid.uuid4().hex
+        try:
+            async with session_factory() as session, session.begin():
+                execution = await session.get(ExecutionORM, execution_id)
+                if execution is None or execution.status != "EXECUTING":
+                    continue
+                db_now = (await session.execute(select(func.now()))).scalar_one()
+                try:
+                    row = (
+                        await session.execute(
+                            select(ActionIntentORM)
+                            .where(
+                                ActionIntentORM.tenant_id == tenant_id,
+                                ActionIntentORM.intent_id == intent_id,
+                                ActionIntentORM.revision == revision,
+                            )
+                            .with_for_update(nowait=True)
+                        )
+                    ).scalar_one_or_none()
+                except (OperationalError, DBAPIError):
+                    continue
+                if row is None or IntentState(row.state) is not IntentState.EXECUTING:
+                    continue
+                require_transition(IntentState.EXECUTING, IntentState.EXECUTION_UNKNOWN)
+                sequence = (
+                    await session.execute(
+                        select(func.max(StateTransitionORM.sequence)).where(
+                            StateTransitionORM.tenant_id == tenant_id,
+                            StateTransitionORM.intent_id == intent_id,
+                            StateTransitionORM.intent_revision == revision,
+                        )
+                    )
+                ).scalar_one()
+                next_sequence = int(sequence or 0) + 1
+                session.add(
+                    StateTransitionORM(
+                        tenant_id=tenant_id,
+                        intent_id=intent_id,
+                        intent_revision=revision,
+                        from_state=row.state,
+                        to_state=IntentState.EXECUTION_UNKNOWN.value,
+                        actor_type="system",
+                        actor_id="execution-worker",
+                        command_id=f"{command_id}:execution_unknown:{next_sequence}",
+                        reason_code="executing_lease_expired",
+                        metadata_={},
+                        sequence=next_sequence,
+                        occurred_at=db_now,
+                    )
+                )
+                session.add(
+                    OutboxMessageORM(
+                        topic="execution.execution_unknown",
+                        payload={
+                            "tenant_id": tenant_id,
+                            "intent_id": str(intent_id),
+                            "revision": revision,
+                            "to_state": IntentState.EXECUTION_UNKNOWN.value,
+                            "command_id": command_id,
+                        },
+                    )
+                )
+                row.state = IntentState.EXECUTION_UNKNOWN.value
+                row.state_version += 1
+                execution.status = "UNKNOWN"
+                execution.error_code = "executing_lease_expired"
+                # Hand the execution to the single reconciliation scheduler.
+                execution.next_reconcile_at = db_now
+                recovered += 1
+        except (StateConflictError, DBAPIError, OperationalError):
+            continue
+    return recovered
 
 
 def _target_query_for(adapter: InfrastructureAdapter) -> Any:

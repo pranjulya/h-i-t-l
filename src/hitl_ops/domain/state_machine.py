@@ -50,7 +50,13 @@ _LEGAL_TRANSITIONS: dict[IntentState, frozenset[IntentState]] = {
         {IntentState.EXECUTING, IntentState.STALE, IntentState.EXPIRED}
     ),
     IntentState.EXECUTING: frozenset(
-        {IntentState.SUCCEEDED, IntentState.FAILED, IntentState.EXECUTION_UNKNOWN}
+        {
+            IntentState.SUCCEEDED,
+            IntentState.FAILED,
+            IntentState.EXECUTION_UNKNOWN,
+            IntentState.STALE,
+            IntentState.EXPIRED,
+        }
     ),
     IntentState.EXECUTION_UNKNOWN: frozenset({IntentState.SUCCEEDED, IntentState.FAILED}),
     IntentState.SUCCEEDED: frozenset(),

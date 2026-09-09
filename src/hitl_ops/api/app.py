@@ -82,11 +82,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             and int(content_length) > resolved.max_request_bytes
         ):
             return _payload_too_large(correlation_id)
-        # Chunked bodies and requests without Content-Length must be capped by
-        # the actual body size, not just the advertised header.
-        body = await request.body()
-        if len(body) > resolved.max_request_bytes:
-            return _payload_too_large(correlation_id)
+        # Chunked bodies and requests without Content-Length cannot be trusted
+        # on headers: stream with a hard cap and stop reading once the limit
+        # is exceeded, so an oversized body cannot exhaust memory.
+        if content_length is None or not content_length.isdigit():
+            received = 0
+            async for chunk in request.stream():
+                received += len(chunk)
+                if received > resolved.max_request_bytes:
+                    return _payload_too_large(correlation_id)
+        else:
+            body = await request.body()
+            if len(body) > resolved.max_request_bytes:
+                return _payload_too_large(correlation_id)
 
         if not rate_limiter.allow(request.client.host if request.client else "anonymous"):
             return JSONResponse(
