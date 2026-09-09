@@ -127,19 +127,31 @@ def evaluate_policy(
     reason_codes: list[str] = []
 
     if risk.band is RiskBand.CRITICAL:
-        disposition = PolicyDisposition.REQUIRE_APPROVAL
-        route = ApprovalRoute.CRITICAL_TWO_STEP
+        if raw_disposition == "BLOCK":
+            disposition = PolicyDisposition.BLOCK
+        else:
+            disposition = PolicyDisposition.REQUIRE_APPROVAL
+            if raw_disposition == "ALLOW":
+                reason_codes.append("tool_minimum_enforced")
+        route = (
+            ApprovalRoute.NONE
+            if disposition is PolicyDisposition.BLOCK
+            else ApprovalRoute.CRITICAL_TWO_STEP
+        )
         if not roles:
             roles = _CRITICAL_ROLES
-        if raw_disposition == "ALLOW":
-            reason_codes.append("tool_minimum_enforced")
     elif risk.band is RiskBand.HIGH:
-        disposition = PolicyDisposition.REQUIRE_APPROVAL
-        route = ApprovalRoute.SINGLE
+        if raw_disposition == "BLOCK":
+            disposition = PolicyDisposition.BLOCK
+        else:
+            disposition = PolicyDisposition.REQUIRE_APPROVAL
+            if raw_disposition == "ALLOW":
+                reason_codes.append("tool_minimum_enforced")
+        route = (
+            ApprovalRoute.NONE if disposition is PolicyDisposition.BLOCK else ApprovalRoute.SINGLE
+        )
         if not roles:
             roles = _SINGLE_APPROVAL_ROLES
-        if raw_disposition == "ALLOW":
-            reason_codes.append("tool_minimum_enforced")
     else:
         if raw_disposition == "BLOCK":
             disposition = PolicyDisposition.BLOCK

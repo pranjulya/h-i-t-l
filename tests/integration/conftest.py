@@ -135,3 +135,76 @@ async def create_pending_intent(
         "requester_id": requester_id,
         "tenant_id": tenant_id,
     }
+
+
+APPROVAL_ROLES_BY_TOOL: dict[str, tuple[str, ...]] = {
+    "restart_service": ("approver",),
+    "scale_service": ("approver",),
+    "provision_resource": ("approver",),
+    "delete_resource": ("critical_approver_l1", "critical_approver_l2"),
+}
+
+
+async def create_approved_intent(
+    session: AsyncSession,
+    *,
+    tool: str,
+    parameters: dict,
+    tenant_id: str = "tenant-1",
+    requester_id: str = "user-1",
+    approvers: tuple[str, ...] = ("approver-1",),
+) -> dict:
+    """Create, evaluate, and fully approve an intent; ready for a claim."""
+
+    from hitl_ops.application.commands import ApprovalCommandService, ApprovalDecisionCommand
+    from hitl_ops.domain.enums import ApprovalDecision
+    from hitl_ops.infrastructure.identity import AuthenticatedActor
+    from hitl_ops.infrastructure.orm import RoleAssignmentORM
+
+    pending = await create_pending_intent(
+        session, tool=tool, parameters=parameters, tenant_id=tenant_id, requester_id=requester_id
+    )
+    roles = APPROVAL_ROLES_BY_TOOL[tool]
+    for approver, role in zip(approvers, roles, strict=False):
+        session.add(
+            RoleAssignmentORM(
+                tenant_id=tenant_id,
+                principal_id=approver,
+                role=role,
+                environments=None,
+                granted_by="bootstrap",
+            )
+        )
+        pending[f"approver_{len(pending)}"] = approver
+    await session.flush()
+
+    levels = [1] if len(roles) == 1 else [1, 2]
+    version = pending["expected_state_version"]
+    for level, approver in zip(levels, approvers, strict=False):
+        actor = AuthenticatedActor(
+            actor_id=approver,
+            tenant_id=tenant_id,
+            correlation_id="corr-test",
+            scopes=frozenset({"ops:write", "ops:read"}),
+        )
+        snapshot = await ApprovalCommandService(session).decide(
+            ApprovalDecisionCommand(
+                tenant_id=tenant_id,
+                intent_id=pending["intent_id"],
+                revision=1,
+                intent_digest=pending["digest"],
+                level=level,
+                decision=ApprovalDecision.APPROVE,
+                reason="test approval",
+                expected_state_version=version,
+                actor=actor,
+                command_id=uuid.uuid4().hex,
+                obligations={
+                    "announce_in_incident_channel": "inc-123",
+                    "require_change_ticket": "CHG-123",
+                },
+            )
+        )
+        version = snapshot.state_version
+    pending["expected_state_version"] = version
+    return pending

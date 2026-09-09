@@ -272,3 +272,32 @@ class RoleAssignmentORM(Base):
     valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     granted_by: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
+class ExecutionORM(Base):
+    __tablename__ = "executions"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "intent_id", "intent_revision", name="uq_executions_revision"
+        ),
+        UniqueConstraint("operation_key", name="uq_executions_operation_key"),
+        Index("ix_executions_claim_lease", "status", "claim_expires_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[str] = mapped_column(String(63), nullable=False)
+    intent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    intent_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    operation_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_operation_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    precondition_snapshot: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    result_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)

@@ -47,6 +47,12 @@ class ApprovalExpiredError(DomainError):
     http_status = 409
 
 
+class IdempotencyConflictError(DomainError):
+    code = "IDEMPOTENCY_CONFLICT"
+    message = "Idempotency key was already used with a different request."
+    http_status = 409
+
+
 class NotFoundError(DomainError):
     code = "NOT_FOUND"
     message = "Resource not found."

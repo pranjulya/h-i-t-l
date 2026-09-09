@@ -1,6 +1,6 @@
 # Phase 04 — Revalidation, Concurrency, and Idempotency
 
-**Status:** NOT_STARTED
+**Status:** TESTED — implemented with race/crash/idempotency tests (one permit per revision, lease retake, digest staleness, policy/authorization refresh), Ruff, and strict mypy; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
 
 ## Goal
 
