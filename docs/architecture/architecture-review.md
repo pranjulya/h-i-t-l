@@ -111,3 +111,22 @@ security + failure) against PostgreSQL 16.
 
 Threat-model controls: `tests/security/`, `tests/failure/`, residual risks in
 `docs/architecture/threat-model.md` §9. Release gates: `docs/operations/release-checklist.md`.
+
+## 12. Known limitations (learning/demo scope)
+
+The following are explicitly not production claims until tests genuinely
+establish them:
+
+- Production OIDC/JWKS identity: the service validates HS256 test-issuer
+  tokens; asymmetric trust, issuer discovery, and key rotation are not
+  implemented.
+- Full observability and alerts: in-process counters and JSON logs exist, but
+  no exporter, endpoint, dashboards, or alert rules ship with this repo.
+- Executing-lease recovery bounds: recovery honors an expired
+  EXECUTING lease via reconciliation, but lease durations and scheduler
+  cadence are deployment configuration, not proven production values.
+
+Crash recovery after provider send, adapter precondition enforcement, and
+the Compose topology are covered by `tests/failure/test_worker_crash.py`,
+`tests/contract/test_adapter_contract.py`, and the CI `compose-smoke` job
+respectively.

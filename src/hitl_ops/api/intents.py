@@ -94,6 +94,8 @@ async def create_intent_from_proposal(
         command_id=command.command_id,
         correlation_id=command.correlation_id,
     )
+    stored = await IntentRepository(session).get(actor.tenant_id, command.intent_id, 1)
+    expires_at = stored.approval_expires_at.isoformat() if stored.approval_expires_at else None
     return {
         "intent_id": str(command.intent_id),
         "revision": 1,
@@ -116,7 +118,7 @@ async def create_intent_from_proposal(
             "required_roles": list(policy.required_roles)
             if policy.route in (ApprovalRoute.SINGLE, ApprovalRoute.CRITICAL_TWO_STEP)
             else [],
-            "expires_at": None,
+            "expires_at": expires_at,
         },
         "links": {
             "self": f"/v1/intents/{command.intent_id}",

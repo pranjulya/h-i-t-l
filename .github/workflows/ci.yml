@@ -44,10 +44,33 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --frozen
-      - run: uv run pytest -q
+      - run: uv run pytest -q -rs
+      - name: Fail on unexpected skips
+        run: |
+          uv run pytest -q -rs 2>&1 | tee pytest-out.txt
+          if grep -E "SKIPPED.*(integration|security|failure)" pytest-out.txt; then
+            echo "unexpected skipped integration/security/failure tests" >&2
+            exit 1
+          fi
 
   migrations:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hitl_ops
+        ports:
+          - "5432:5432"
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/hitl_ops
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -55,10 +78,29 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --frozen
-      - run: uv run alembic history
+      - run: uv run alembic upgrade head
+      - run: uv run alembic downgrade base
+      - run: uv run alembic upgrade head
 
   docker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: docker build .
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose up -d --build
+      - run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/health/ready; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "compose smoke test: /health/ready never became ready" >&2
+          docker compose logs
+          exit 1
+      - run: docker compose down
