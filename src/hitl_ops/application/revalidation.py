@@ -128,6 +128,37 @@ def policy_stricter(current: Any, original: Any) -> bool:
 _TARGET_IDENTITY_FIELDS = ("service", "resource_id", "name")
 
 
+async def _critical_levels_authorized(
+    session: AsyncSession,
+    intent: ActionIntentORM,
+    decisions: Any,
+    required_roles: tuple[str, ...],
+    db_now: datetime,
+) -> bool:
+    """Revalidate each critical level against its exact required role.
+
+    Level 1 must be held by an actor who currently holds required_roles[0]
+    and level 2 by a *distinct* actor who currently holds required_roles[1].
+    """
+
+    if len(required_roles) < 2:
+        return False
+    environment = intent.canonical_parameters.get("environment")
+    level_actor: dict[int, str] = {}
+    for decision in decisions:
+        if decision.level not in (1, 2):
+            continue
+        level_actor.setdefault(decision.level, decision.actor_id)
+    if set(level_actor) != {1, 2} or level_actor[1] == level_actor[2]:
+        return False
+    for level, required_role in ((1, required_roles[0]), (2, required_roles[1])):
+        assignments = await load_assignments(session, intent.tenant_id, level_actor[level])
+        roles = evaluate_current_roles(assignments, db_now, environment)
+        if required_role not in roles:
+            return False
+    return True
+
+
 def check_preconditions(
     tool: str, parameters: dict[str, Any], snapshot: TargetSnapshot
 ) -> str | None:
@@ -430,19 +461,30 @@ class RevalidationService:
                 .scalars()
                 .all()
             )
-            current_authorized = 0
-            for decision in decisions:
-                assignments = await load_assignments(
-                    self._session, intent.tenant_id, decision.actor_id
-                )
-                roles = evaluate_current_roles(
-                    assignments, datetime.now(UTC), intent.canonical_parameters.get("environment")
-                )
-                if any(role in roles for role in policy_row.required_roles):
-                    current_authorized += 1
-            required = 2 if route is ApprovalRoute.CRITICAL_TWO_STEP else 1
-            if current_authorized < required:
-                return fail(IntentState.STALE, "approver_no_longer_authorized")
+            if route is ApprovalRoute.CRITICAL_TWO_STEP:
+                if not await _critical_levels_authorized(
+                    self._session,
+                    intent,
+                    decisions,
+                    tuple(policy_row.required_roles),
+                    db_now,
+                ):
+                    return fail(IntentState.STALE, "approver_no_longer_authorized")
+            else:
+                current_authorized = 0
+                for decision in decisions:
+                    assignments = await load_assignments(
+                        self._session, intent.tenant_id, decision.actor_id
+                    )
+                    roles = evaluate_current_roles(
+                        assignments,
+                        datetime.now(UTC),
+                        intent.canonical_parameters.get("environment"),
+                    )
+                    if any(role in roles for role in policy_row.required_roles):
+                        current_authorized += 1
+                if current_authorized < 1:
+                    return fail(IntentState.STALE, "approver_no_longer_authorized")
 
         # Gate 3: current policy re-evaluation (stricter result stales).
         tool = ToolName(intent.tool)

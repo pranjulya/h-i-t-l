@@ -151,3 +151,54 @@ async def test_expiry_error_is_not_raised_by_claim(
     assert failure is not None
     assert failure.state is IntentState.EXPIRED
     assert failure.reason_code == "approval_ttl_elapsed"
+
+
+_DELETE = {
+    "environment": "staging",
+    "resource_type": "postgres_instance",
+    "resource_id": "pg-main-1",
+    "deletion_mode": "hard",
+}
+
+
+async def test_l1_actor_losing_l1_and_gaining_l2_stales_the_claim(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    """Exact-level revalidation: the L1 actor must still hold L1 at claim time."""
+
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        pending = await create_approved_intent(
+            session,
+            tool="delete_resource",
+            parameters=_DELETE,
+            approvers=("l1-user", "l2-user"),
+        )
+        # The L1 approver loses critical_approver_l1 and gains
+        # critical_approver_l2 after approving: the level-1 decision no longer
+        # has a currently authorized L1 actor, so the claim must stale.
+        await session.execute(
+            update(RoleAssignmentORM)
+            .where(
+                RoleAssignmentORM.tenant_id == "tenant-1",
+                RoleAssignmentORM.principal_id == "l1-user",
+            )
+            .values(revoked_at=datetime.now(UTC) - timedelta(seconds=1))
+        )
+        from hitl_ops.infrastructure.orm import RoleAssignmentORM as RoleORM
+
+        session.add(
+            RoleORM(
+                tenant_id="tenant-1",
+                principal_id="l1-user",
+                role="critical_approver_l2",
+                environments=None,
+                granted_by="test",
+            )
+        )
+
+    async with maker() as session, session.begin():
+        failure = await _claim(session, pending, _bundle())
+    assert failure is not None
+    assert failure.state is IntentState.STALE
+    assert failure.reason_code == "approver_no_longer_authorized"
