@@ -53,7 +53,11 @@ class OutboxPublisher:
             (
                 await self._session.execute(
                     select(OutboxMessageORM)
-                    .where(OutboxMessageORM.published_at.is_(None))
+                    .where(
+                        OutboxMessageORM.published_at.is_(None),
+                        (OutboxMessageORM.next_attempt_at.is_(None))
+                        | (OutboxMessageORM.next_attempt_at <= now),
+                    )
                     .order_by(OutboxMessageORM.created_at)
                     .limit(self._batch_limit)
                     .with_for_update(skip_locked=True)

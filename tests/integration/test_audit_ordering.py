@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -45,8 +47,8 @@ async def test_audit_sequence_is_monotonic_without_gaps(
     sequences = [r.sequence for r in rows]
     assert sequences == list(range(1, len(sequences) + 1))
     assert rows[0].previous_hash == "0" * 64
-    for previous, current in zip(rows, rows[1:], strict=False):
-        assert current.previous_hash == previous.event_hash
+    for current, next_row in pairwise(rows):
+        assert next_row.previous_hash == current.event_hash
 
     async with maker() as session, session.begin():
         valid, problem = await verify_aggregate_chain(session, "tenant-1", pending["intent_id"])

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import func, select, text
@@ -170,5 +171,49 @@ async def test_hash_chain_detects_tampering(migrated_database: str, engine: Asyn
         await session.rollback()
 
     async with maker() as session, session.begin():
-        valid, problem = await verify_aggregate_chain(session, "tenant-1", command.intent_id)
+        valid, _ = await verify_aggregate_chain(session, "tenant-1", command.intent_id)
     assert valid is True
+
+
+async def test_empty_audit_chain_is_not_valid(migrated_database: str, engine: AsyncEngine) -> None:
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        valid, problem = await verify_aggregate_chain(session, "tenant-1", uuid.uuid4())
+    assert valid is False
+    assert problem == "empty audit chain"
+
+
+async def test_backoff_schedules_and_skips_unready_retries(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    from datetime import timedelta
+
+    maker = build_sessionmaker(engine)
+    sink = RecordingNotificationSink()
+    async with maker() as session, session.begin():
+        command = _command()
+        await IntentRepository(session).create(command)
+        # An outbox row whose next attempt is still in the future must not be
+        # retried during this pass.
+        session.add(
+            OutboxMessageORM(
+                topic="intent.created",
+                payload={"intent_id": str(uuid.uuid4()), "tenant_id": "tenant-1"},
+                next_attempt_at=datetime.now(UTC) + timedelta(minutes=5),
+            )
+        )
+
+    async with maker() as session, session.begin():
+        publisher = OutboxPublisher(session, AuditWriter(session), sink)
+        stats = await publisher.publish_pending()
+
+    async with maker() as session, session.begin():
+        unready = (
+            await session.execute(
+                select(func.count())
+                .select_from(OutboxMessageORM)
+                .where(OutboxMessageORM.published_at.is_(None))
+            )
+        ).scalar_one()
+    assert stats["audited"] >= 1  # the intent.created row was published
+    assert unready == 1  # the future-scheduled row remains untouched
