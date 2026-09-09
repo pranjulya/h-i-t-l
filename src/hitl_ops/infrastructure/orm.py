@@ -211,3 +211,64 @@ class PolicyBundleORM(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class ApprovalDecisionORM(Base):
+    __tablename__ = "approval_decisions"
+    __table_args__ = (
+        Index(
+            "uq_approval_decisions_approving_actor",
+            "tenant_id",
+            "intent_id",
+            "intent_revision",
+            "level",
+            "actor_id",
+            unique=True,
+            postgresql_where=text("decision = 'APPROVE'"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[str] = mapped_column(String(63), nullable=False)
+    intent_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    intent_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    intent_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    level: Mapped[int] = mapped_column(Integer, nullable=False)
+    decision: Mapped[str] = mapped_column(String(16), nullable=False)
+    actor_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    actor_roles_snapshot: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    scope_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class RoleAssignmentORM(Base):
+    __tablename__ = "role_assignments"
+    __table_args__ = (
+        Index(
+            "uq_role_assignments_active_grant",
+            "tenant_id",
+            "principal_id",
+            "role",
+            "environments_key",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id: Mapped[str] = mapped_column(String(63), nullable=False)
+    principal_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(63), nullable=False)
+    environments: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    environments_key: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    valid_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    granted_by: Mapped[str] = mapped_column(String(255), nullable=False)
