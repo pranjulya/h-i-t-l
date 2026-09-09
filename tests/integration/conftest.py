@@ -37,6 +37,14 @@ def reset_schema(database_url: str) -> None:
         engine = build_engine(database_url)
         try:
             async with engine.begin() as connection:
+                # Kill connections abandoned by crashed or killed test runs so
+                # the schema reset cannot deadlock on stale locks.
+                await connection.execute(
+                    text(
+                        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                        "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+                    )
+                )
                 await connection.execute(text("DROP SCHEMA public CASCADE"))
                 await connection.execute(text("CREATE SCHEMA public"))
         finally:

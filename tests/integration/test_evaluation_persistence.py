@@ -133,7 +133,12 @@ async def test_record_persists_evidence_and_routes_intent(
             .scalars()
             .all()
         )
-        assert set(topics) == {"intent.created", "risk.evaluated", "policy.evaluated"}
+        assert set(topics) == {
+            "intent.created",
+            "risk.evaluated",
+            "policy.evaluated",
+            "intent.transitioned",
+        }
 
 
 async def test_record_is_idempotent_per_revision(

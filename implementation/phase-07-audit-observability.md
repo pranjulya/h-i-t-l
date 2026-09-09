@@ -1,6 +1,6 @@
 # Phase 07 — Audit Trail, Notification Delivery, and Observability
 
-**Status:** NOT_STARTED
+**Status:** TESTED — implemented with hash-chain, redaction, outbox, audit-ordering, and notification-delivery tests (DB-level append-only trigger, idempotent consumers, retry metadata), Ruff, and strict mypy; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
 
 ## Goal
 
