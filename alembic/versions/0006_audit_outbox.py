@@ -55,6 +55,13 @@ def upgrade() -> None:
     op.create_index(
         "ix_audit_events_aggregate", "audit_events", ["tenant_id", "aggregate_id", "sequence"]
     )
+    op.create_index(
+        "uq_audit_events_causation",
+        "audit_events",
+        ["tenant_id", "aggregate_id", "causation_id"],
+        unique=True,
+        postgresql_where=sa.text("causation_id IS NOT NULL"),
+    )
 
     # Database-level immutability: even the application role cannot rewrite history.
     op.execute(
@@ -82,6 +89,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute(sa.text("DROP TRIGGER IF EXISTS trg_audit_events_immutable ON audit_events"))
     op.execute(sa.text("DROP FUNCTION IF EXISTS audit_events_immutable()"))
+    op.drop_index("uq_audit_events_causation", table_name="audit_events")
     op.drop_index("ix_audit_events_aggregate", table_name="audit_events")
     op.drop_table("audit_events")
     op.drop_index("ix_outbox_messages_pending", table_name="outbox_messages")

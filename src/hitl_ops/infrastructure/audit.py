@@ -93,6 +93,15 @@ class AuditWriter:
         policy_version: str | None = None,
         risk_version: str | None = None,
     ) -> AuditEvent:
+        # Serialize appends per aggregate so two publishers cannot allocate the
+        # same next sequence or previous hash and then lose the uniqueness race.
+        await self._session.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtext(tenant_id), func.hashtext(str(aggregate_id))
+                )
+            )
+        )
         if causation_id is not None:
             existing = (
                 await self._session.execute(
@@ -221,6 +230,8 @@ async def verify_aggregate_chain(
     )
     previous_hash = "0" * 64
     expected_sequence = 1
+    if not rows:
+        return False, "empty audit chain"
     for row in rows:
         if row.sequence != expected_sequence:
             return False, f"sequence gap at {row.sequence}"

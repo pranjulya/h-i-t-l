@@ -145,6 +145,14 @@ class AuditEventORM(Base):
             name="uq_audit_events_aggregate_sequence",
         ),
         Index("ix_audit_events_aggregate", "tenant_id", "aggregate_id", "sequence"),
+        Index(
+            "uq_audit_events_causation",
+            "tenant_id",
+            "aggregate_id",
+            "causation_id",
+            unique=True,
+            postgresql_where=text("causation_id IS NOT NULL"),
+        ),
     )
 
     event_id: Mapped[uuid.UUID] = mapped_column(
