@@ -58,6 +58,7 @@ class ExecutionPermit:
     typed_parameters: dict[str, Any]
     operation_key: str
     precondition_token: str
+    resource_version: str | None
     execution_id: uuid.UUID
     issued_at: datetime
 
@@ -398,6 +399,7 @@ class RevalidationService:
                 execution.precondition_snapshot, sort_keys=True, separators=(",", ":"), default=str
             ).encode("utf-8")
         ).hexdigest()
+        snapshot_stored = execution.precondition_snapshot or {}
         return ExecutionPermit(
             tenant_id=tenant_id,
             intent_id=intent_id,
@@ -407,6 +409,7 @@ class RevalidationService:
             typed_parameters=intent.canonical_parameters,
             operation_key=operation_key,
             precondition_token=precondition_token,
+            resource_version=snapshot_stored.get("resource_version"),
             execution_id=execution.id,
             issued_at=db_now,
         )
@@ -506,5 +509,6 @@ class RevalidationService:
             "identity": snapshot.identity,
             "health": snapshot.health,
             "facts": snapshot.facts,
+            "resource_version": snapshot.resource_version,
         }
         return None

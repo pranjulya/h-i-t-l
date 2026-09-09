@@ -20,6 +20,7 @@ class TargetSnapshot:
     identity: dict[str, Any] = field(default_factory=dict)
     health: str = "unknown"
     facts: dict[str, Any] = field(default_factory=dict)
+    resource_version: str | None = None
 
 
 class LiveTargetQuery(Protocol):
@@ -45,11 +46,20 @@ class AdapterUnavailableError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class AdapterCommand:
-    """Typed command data; adapters never receive tool names plus arbitrary dicts."""
+    """Typed command data; adapters never receive tool names plus arbitrary dicts.
+
+    ``resource_version`` is the provider's own concurrency token for the exact
+    target observed during revalidation. Adapters must enforce it through a
+    provider-native conditional mutation (or an atomic adapter-side
+    compare-and-mutate) and raise AdapterPreSendError without side effects on
+    mismatch. ``None`` means the target exposes no version and the command is
+    not version-guarded.
+    """
 
     operation_key: str
     precondition_token: str
     parameters: dict[str, Any]
+    resource_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

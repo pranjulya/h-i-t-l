@@ -95,3 +95,39 @@ async def test_adapter_rejects_credential_like_parameters() -> None:
     )
     with pytest.raises(AdapterPreSendError):
         await adapter.execute(ToolName.INSPECT_SERVICE, command)
+
+
+async def test_stale_resource_version_is_rejected_without_side_effect() -> None:
+    adapter = DemoInfrastructureAdapter()
+    tool = ToolName.SCALE_SERVICE
+    parameters = dict(_CASES[tool])
+    snapshot = await adapter.fetch(tool, parameters)
+    assert snapshot.resource_version is not None
+
+    # The target changes between revalidation and execution.
+    adapter.rotate_target(tool, parameters)
+
+    stale = AdapterCommand(
+        operation_key="tenant-1:stale:1",
+        precondition_token="tok-stale",
+        parameters=parameters,
+        resource_version=snapshot.resource_version,
+    )
+    with pytest.raises(AdapterPreSendError):
+        await adapter.execute(tool, stale)
+    # No side effect was recorded for the rejected mutation.
+    assert "tenant-1:stale:1" not in adapter._operations
+
+    # A fresh fetch observes the new version and the mutation proceeds.
+    fresh = await adapter.fetch(tool, parameters)
+    assert fresh.resource_version != snapshot.resource_version
+    result = await adapter.execute(
+        tool,
+        AdapterCommand(
+            operation_key="tenant-1:stale:1",
+            precondition_token="tok-fresh",
+            parameters=parameters,
+            resource_version=fresh.resource_version,
+        ),
+    )
+    assert result.outcome == ExecutionOutcome.SUCCEEDED.value

@@ -29,10 +29,33 @@ def _provider_operation_id(operation_key: str) -> str:
 
 
 class DemoInfrastructureAdapter:
-    """Owns the demo 'provider' state; idempotent duplicate delivery."""
+    """Owns the demo 'provider' state; idempotent duplicate delivery.
+
+    The demo provider keeps a per-target resource version. ``fetch`` reports
+    the current version; ``execute`` performs an atomic compare-and-mutate
+    against the version carried in the command and raises AdapterPreSendError
+    with no side effect on mismatch.
+    """
 
     def __init__(self) -> None:
         self._operations: dict[str, dict[str, Any]] = {}
+        self._target_versions: dict[str, str] = {}
+
+    def _target_key(self, tool: ToolName, parameters: dict[str, Any]) -> str:
+        identity = {
+            field: parameters[field]
+            for field in ("service", "name", "resource_id")
+            if parameters.get(field) is not None
+        }
+        return f"{tool.value}:{sorted(identity.items())}"
+
+    def rotate_target(self, tool: ToolName, parameters: dict[str, Any]) -> str:
+        """Simulate an out-of-band target change; returns the new version."""
+
+        key = self._target_key(tool, parameters)
+        version = f"v{int(self._target_versions.get(key, 'v0')[1:] or 0) + 1}"
+        self._target_versions[key] = version
+        return version
 
     async def fetch(self, tool: ToolName, parameters: dict[str, Any]) -> TargetSnapshot:
         identity = {
@@ -40,11 +63,14 @@ class DemoInfrastructureAdapter:
             for field in ("service", "name", "resource_id")
             if parameters.get(field) is not None
         }
+        key = self._target_key(tool, parameters)
+        version = self._target_versions.setdefault(key, "v1")
         return TargetSnapshot(
             found=True,
             identity=identity,
             health="healthy",
             facts={},
+            resource_version=version,
         )
 
     async def execute(self, tool: ToolName, command: AdapterCommand) -> AdapterResult:
@@ -60,6 +86,12 @@ class DemoInfrastructureAdapter:
 
         if "credentials" in command.parameters:
             raise AdapterPreSendError("adapter accepts operational parameters only")
+
+        # Atomic compare-and-mutate on the provider-side resource version.
+        key = self._target_key(tool, command.parameters)
+        current = self._target_versions.setdefault(key, "v1")
+        if command.resource_version is not None and command.resource_version != current:
+            raise AdapterPreSendError("target changed between revalidation and execution")
 
         provider_operation_id = _provider_operation_id(command.operation_key)
 
