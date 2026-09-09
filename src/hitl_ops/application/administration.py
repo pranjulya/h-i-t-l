@@ -16,7 +16,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from hitl_ops.domain.errors import ForbiddenError, NotFoundError
+from hitl_ops.domain.errors import ForbiddenError, NotFoundError, StateConflictError
 from hitl_ops.infrastructure.authorization import require_administrator
 from hitl_ops.infrastructure.identity import AuthenticatedActor
 from hitl_ops.infrastructure.orm import OutboxMessageORM, PolicyBundleORM, RoleAssignmentORM
@@ -75,17 +75,44 @@ def _audit(session: AsyncSession, topic: str, payload: dict[str, Any]) -> None:
     session.add(OutboxMessageORM(topic=topic, payload=payload))
 
 
+def _environments_key(environments: list[str]) -> str:
+    return ",".join(environments)
+
+
 class AdministrationService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def grant_role(self, command: GrantRoleCommand) -> RoleAssignmentSnapshot:
         await require_administrator(self._session, command.actor)
+        environments = sorted(set(command.environments))
+        existing = (
+            await self._session.execute(
+                select(RoleAssignmentORM).where(
+                    RoleAssignmentORM.tenant_id == command.tenant_id,
+                    RoleAssignmentORM.principal_id == command.principal_id,
+                    RoleAssignmentORM.role == command.role,
+                    RoleAssignmentORM.environments_key == _environments_key(environments),
+                    RoleAssignmentORM.revoked_at.is_(None),
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            return RoleAssignmentSnapshot(
+                assignment_id=existing.id,
+                tenant_id=existing.tenant_id,
+                principal_id=existing.principal_id,
+                role=existing.role,
+                environments=tuple(existing.environments or ()),
+                valid_until=existing.valid_until,
+                revoked_at=existing.revoked_at,
+            )
         row = RoleAssignmentORM(
             tenant_id=command.tenant_id,
             principal_id=command.principal_id,
             role=command.role,
-            environments=list(command.environments) or None,
+            environments=environments or None,
+            environments_key=_environments_key(environments),
             valid_until=command.valid_until,
             granted_by=command.actor.actor_id,
         )
@@ -158,7 +185,7 @@ class AdministrationService:
             )
         ).scalar_one_or_none()
         if existing is not None:
-            raise ForbiddenError("policy bundle version already registered for this tenant")
+            raise StateConflictError("policy bundle version already registered for this tenant")
         row = PolicyBundleORM(
             tenant_id=tenant_id, version=command.version, rules=command.rules, is_active=False
         )

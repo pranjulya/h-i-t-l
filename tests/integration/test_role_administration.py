@@ -159,7 +159,9 @@ async def test_policy_bundle_lifecycle_is_administrator_gated(
         )
 
     async with maker() as session, session.begin():
-        with pytest.raises(ForbiddenError):
+        from hitl_ops.domain.errors import StateConflictError
+
+        with pytest.raises(StateConflictError):
             await AdministrationService(session).register_policy_bundle(
                 RegisterPolicyBundleCommand(
                     version="policy-2",
@@ -214,3 +216,56 @@ async def test_policy_bundle_lifecycle_is_administrator_gated(
             .all()
         )
         assert len(topics) == 2  # registered + activated; the forbidden attempt is not audited
+
+
+async def test_duplicate_grant_returns_single_active_assignment(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    from sqlalchemy import func, select
+
+    from hitl_ops.infrastructure.orm import RoleAssignmentORM
+
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        await grant_role_directly(session, "tenant-1", "admin-1", "administrator")
+
+    async with maker() as session, session.begin():
+        first = await AdministrationService(session).grant_role(
+            _grant("approver-1", "approver", _actor("admin-1"))
+        )
+    async with maker() as session, session.begin():
+        second = await AdministrationService(session).grant_role(
+            _grant("approver-1", "approver", _actor("admin-1"))
+        )
+    assert second.assignment_id == first.assignment_id
+
+    async with maker() as session, session.begin():
+        count = (
+            await session.execute(
+                select(func.count())
+                .select_from(RoleAssignmentORM)
+                .where(
+                    RoleAssignmentORM.tenant_id == "tenant-1",
+                    RoleAssignmentORM.principal_id == "approver-1",
+                    RoleAssignmentORM.role == "approver",
+                    RoleAssignmentORM.revoked_at.is_(None),
+                )
+            )
+        ).scalar_one()
+        assert count == 1
+
+    # Revoking the visible assignment removes the authority: no hidden second
+    # grant survives behind it.
+    async with maker() as session, session.begin():
+        await AdministrationService(session).revoke_role(
+            RevokeRoleCommand(
+                tenant_id="tenant-1",
+                assignment_id=first.assignment_id,
+                actor=_actor("admin-1"),
+                command_id=uuid.uuid4().hex,
+                reason="revoke the single grant",
+            )
+        )
+    async with maker() as session, session.begin():
+        roles = await current_roles(session, _actor("approver-1"), "staging")
+        assert "approver" not in roles
