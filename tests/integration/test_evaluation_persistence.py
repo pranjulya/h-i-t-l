@@ -215,7 +215,7 @@ async def test_blocked_policy_routes_to_blocked_state(
 async def test_active_bundle_loads_from_seed(migrated_database: str, engine: AsyncEngine) -> None:
     maker = build_sessionmaker(engine)
     async with maker() as session, session.begin():
-        loaded = await PolicyBundleRepository(session).get_active()
+        loaded = await PolicyBundleRepository(session).get_active("tenant-1")
     assert loaded is not None
     assert loaded.version == "policy-1"
     assert "scale_service" in loaded.rules["tools"]

@@ -290,10 +290,13 @@ class PolicyBundleRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get_active(self) -> PolicyBundle | None:
+    async def get_active(self, tenant_id: str) -> PolicyBundle | None:
         row = (
             await self._session.execute(
-                select(PolicyBundleORM).where(PolicyBundleORM.is_active.is_(True))
+                select(PolicyBundleORM).where(
+                    PolicyBundleORM.tenant_id == tenant_id,
+                    PolicyBundleORM.is_active.is_(True),
+                )
             )
         ).scalar_one_or_none()
         if row is None:
