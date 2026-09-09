@@ -8,6 +8,7 @@ model never receives credentials or infrastructure access.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -57,6 +58,7 @@ class BoundedProposal:
 
 MAX_REQUEST_CHARS = 4000
 MAX_CONTEXT_ITEMS = 20
+DEFAULT_PROPOSAL_TIMEOUT_SECONDS = 10.0
 
 
 class AgentOrchestrator:
@@ -72,7 +74,17 @@ class AgentOrchestrator:
             )
         bounded_context = dict(list((context or {}).items())[:MAX_CONTEXT_ITEMS])
         try:
-            raw = await self._provider.propose(request_text, bounded_context)
+            raw = await asyncio.wait_for(
+                self._provider.propose(request_text, bounded_context),
+                timeout=DEFAULT_PROPOSAL_TIMEOUT_SECONDS,
+            )
+        except TimeoutError as exc:
+            raise DomainError(
+                "LLM provider call timed out",
+                code="LLM_UNAVAILABLE",
+                http_status=503,
+                retryable=True,
+            ) from exc
         except DomainError:
             raise
         except Exception as exc:  # provider transport failures
