@@ -18,7 +18,7 @@ _IDEM = {"Idempotency-Key": "e2e-key"}
 
 
 def _body(tool: str, parameters: dict) -> dict:
-    return {"tool": tool, "parameters": parameters, "rationale": "e2e journey", "source": "DIRECT"}
+    return {"tool": tool, "parameters": parameters, "rationale": "e2e journey"}
 
 
 def _approve(
@@ -33,8 +33,12 @@ def _approve(
             "decision": "APPROVE",
             "reason": "e2e approval",
             "expected_state_version": version,
+            "obligations": {
+                "announce_in_incident_channel": "inc-123",
+                "require_change_ticket": "CHG-123",
+            },
         },
-        headers=bearer(actor=actor),
+        headers={**bearer(actor=actor), "Idempotency-Key": f"approve-{intent_id}-{level}-{actor}"},
     )
 
 
@@ -175,7 +179,7 @@ def test_rejection_and_cancellation_routes(clean_stack) -> None:
             "reason": "not needed",
             "expected_state_version": current["state_version"],
         },
-        headers=bearer(actor="approver-1"),
+        headers={**bearer(actor="approver-1"), "Idempotency-Key": "e2e-reject-decide"},
     )
     assert rejection.json()["state"] == "REJECTED"
 
@@ -194,7 +198,7 @@ def test_rejection_and_cancellation_routes(clean_stack) -> None:
             "reason": "changed mind",
             "expected_state_version": current["state_version"],
         },
-        headers=bearer(),
+        headers={**bearer(), "Idempotency-Key": "e2e-cancel-decide"},
     )
     assert cancellation.json()["state"] == "CANCELLED"
 
