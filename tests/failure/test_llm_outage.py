@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 from hitl_ops.adapters.demo import DemoInfrastructureAdapter
 from hitl_ops.api.app import create_app
 from tests.api.conftest import api_settings, bearer
-from tests.failure.conftest import failure_database  # noqa: F401
 
 
 def test_model_outage_keeps_direct_api_usable(failure_database) -> None:

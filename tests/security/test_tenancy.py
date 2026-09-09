@@ -8,7 +8,6 @@ from fastapi.testclient import TestClient
 
 from hitl_ops.api.app import create_app
 from tests.api.conftest import api_settings, bearer
-from tests.security.conftest import hardened_database  # noqa: F401
 
 _SCALE = {
     "tool": "scale_service",
@@ -32,6 +31,7 @@ def test_cross_tenant_enumeration_returns_identical_not_found(hardened_database)
 
 
 def test_idempotency_keys_are_scoped_per_tenant_and_actor(hardened_database) -> None:
+    _seed_tenant_bundle("tenant-2")
     with TestClient(create_app(api_settings())) as client:
         tenant1 = client.post(
             "/v1/intents", json=_SCALE, headers={**bearer(), "Idempotency-Key": "shared"}
@@ -51,6 +51,28 @@ def test_actor_cannot_be_spoofed_via_body() -> None:
             json={**_SCALE, "requester_id": "someone-else", "tenant_id": "tenant-9"},
             headers={**bearer(), "Idempotency-Key": "spoof-1"},
         )
-        fetched = client.get(f"/v1/intents/{response.json()['intent_id']}", headers=bearer())
-    assert response.status_code == 201
-    assert fetched.json()["state"] in ("AUTO_APPROVED", "PENDING_APPROVAL_1")
+    # Unknown outer fields are rejected, not silently ignored.
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_FAILED"
+
+
+def _seed_tenant_bundle(tenant_id: str) -> None:
+    from hitl_ops.domain.policy import SEED_POLICY_BUNDLE_RULES
+    from hitl_ops.infrastructure.database import build_engine, build_sessionmaker
+    from hitl_ops.infrastructure.orm import PolicyBundleORM
+
+    async def seed() -> None:
+        maker = build_sessionmaker(build_engine(api_settings().database_url))
+        async with maker() as session, session.begin():
+            session.add(
+                PolicyBundleORM(
+                    tenant_id=tenant_id,
+                    version="policy-1",
+                    rules=SEED_POLICY_BUNDLE_RULES,
+                    is_active=True,
+                )
+            )
+
+    import asyncio
+
+    asyncio.run(seed())

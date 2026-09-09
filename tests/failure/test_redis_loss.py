@@ -40,7 +40,11 @@ async def test_claim_flow_runs_without_any_cache_layer(failure_database, engine)
             async def fetch(self, tool: object, parameters: dict):
                 from hitl_ops.adapters.base import TargetSnapshot
 
-                return TargetSnapshot(found=True, health="healthy")
+                return TargetSnapshot(
+                    found=True,
+                    identity={"service": parameters.get("service")},
+                    health="healthy",
+                )
 
         permit = await service.claim_and_revalidate(
             tenant_id="tenant-1",

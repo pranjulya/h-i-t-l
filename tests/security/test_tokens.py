@@ -131,8 +131,9 @@ def test_revoked_approver_cannot_decide(hardened_database, engine) -> None:
                 "decision": "APPROVE",
                 "reason": "revoked role attempt",
                 "expected_state_version": current["state_version"],
+                "obligations": {"announce_in_incident_channel": "inc-123"},
             },
-            headers=bearer(actor="approver-1"),
+            headers={**bearer(actor="approver-1"), "Idempotency-Key": "rev-d"},
         )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "FORBIDDEN"
@@ -157,7 +158,8 @@ def test_environment_scoped_role_cannot_approve_other_environment(
                 "decision": "APPROVE",
                 "reason": "wrong scope",
                 "expected_state_version": current["state_version"],
+                "obligations": {"announce_in_incident_channel": "inc-123"},
             },
-            headers=bearer(actor="scoped-approver"),
+            headers={**bearer(actor="scoped-approver"), "Idempotency-Key": "scope-d"},
         )
     assert response.status_code == 403
