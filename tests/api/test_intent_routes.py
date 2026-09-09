@@ -14,7 +14,6 @@ _SCALE_BODY = {
     "tool": "scale_service",
     "parameters": {"environment": "staging", "service": "api", "replicas": 4},
     "rationale": "load test",
-    "source": "DIRECT",
 }
 
 

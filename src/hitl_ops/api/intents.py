@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import uuid
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 
 from hitl_ops.agent.orchestrator import AgentOrchestrator
@@ -41,10 +41,11 @@ router = APIRouter(prefix="/v1")
 
 
 class CreateIntentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     tool: str
     parameters: dict[str, Any]
     rationale: str = Field(default="", max_length=2000)
-    source: Literal["AGENT", "DIRECT"] = "DIRECT"
 
 
 async def create_intent_from_proposal(
@@ -55,6 +56,7 @@ async def create_intent_from_proposal(
     parameters: dict[str, Any],
     rationale: str,
     source: str,
+    correlation_id: str,
 ) -> dict[str, Any]:
     """Shared creation flow: validate → canonicalize → persist → evaluate → route."""
 
@@ -72,11 +74,11 @@ async def create_intent_from_proposal(
         source=IntentSource(source.upper()),
         raw_proposal={"tool": tool, "parameters": parameters},
         command_id=uuid.uuid4().hex,
-        correlation_id=actor.correlation_id,
+        correlation_id=correlation_id,
         actor_id=actor.actor_id,
     )
-    snapshot = await IntentRepository(session).create(command)
-    bundle = await PolicyBundleRepository(session).get_active()
+    await IntentRepository(session).create(command)
+    bundle = await PolicyBundleRepository(session).get_active(actor.tenant_id)
     if bundle is None:
         raise DomainError("no active policy bundle", code="POLICY_BLOCKED", http_status=409)
     risk = evaluate_risk(command.tool, command.canonical_parameters, RiskContext())
@@ -126,6 +128,8 @@ def validated_tool(tool: str) -> ToolName:
 
 
 class AgentIntentBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     request: str = Field(min_length=1, max_length=4000)
     context_refs: dict[str, Any] = Field(default_factory=dict)
 
@@ -164,6 +168,7 @@ async def create_agent_intent(
         parameters=proposal.parameters.model_dump(mode="json"),
         rationale=proposal.rationale,
         source="AGENT",
+        correlation_id=request.state.correlation_id,
     )
     await idempotency.complete(
         tenant_id=actor.tenant_id,
@@ -178,6 +183,7 @@ async def create_agent_intent(
 
 @router.post("/intents", status_code=201)
 async def create_intent(
+    request: Request,
     session: SessionDep,
     actor: ActorDep,
     body: CreateIntentBody,
@@ -206,7 +212,8 @@ async def create_intent(
         tool=body.tool,
         parameters=body.parameters,
         rationale=body.rationale,
-        source=body.source,
+        source="DIRECT",
+        correlation_id=request.state.correlation_id,
     )
     await idempotency.complete(
         tenant_id=actor.tenant_id,

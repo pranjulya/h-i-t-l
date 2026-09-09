@@ -20,11 +20,16 @@ def api_settings(**overrides: object) -> Settings:
     return base_make_settings(**values)  # type: ignore[arg-type]
 
 
-def bearer(actor: str = "user-1", tenant: str = "tenant-1") -> dict[str, str]:
+def bearer(
+    actor: str = "user-1",
+    tenant: str = "tenant-1",
+    scopes: tuple[str, ...] = ("ops:write", "ops:read"),
+) -> dict[str, str]:
     token = jwt.encode(
         {
             "sub": actor,
             "tenant": tenant,
+            "scope": " ".join(scopes),
             "iss": "https://test-issuer.local",
             "aud": "hitl-ops",
             "exp": datetime.now(UTC) + timedelta(minutes=10),
