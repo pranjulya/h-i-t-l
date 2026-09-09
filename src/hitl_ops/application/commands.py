@@ -5,6 +5,10 @@ validates guards (digest binding, TTL, current authorization, distinctness),
 appends append-only evidence, applies only legal transitions from the
 authoritative state table, and writes a same-transaction audit outbox row for
 every committed transition.
+
+No service method commits or rolls back: callers own the transaction, and the
+service only flushes. On the expiry path the caller must commit (not roll back)
+so the durable EXPIRED transition persists; retries then observe EXPIRED state.
 """
 
 from __future__ import annotations
@@ -200,7 +204,7 @@ class ApprovalCommandService:
             raise ApprovalStaleError("decision digest does not match the current revision")
 
         current = IntentState(intent.state)
-        if (
+        expired = (
             current
             in (
                 IntentState.PENDING_APPROVAL_1,
@@ -210,7 +214,12 @@ class ApprovalCommandService:
             )
             and intent.approval_expires_at is not None
             and intent.approval_expires_at <= db_now
-        ):
+        )
+        if expired:
+            # The caller owns the transaction. Persist EXPIRED so the caller's
+            # commit durably records it, then raise: the error response carries
+            # no new command state, and the durable EXPIRED row is what a retry
+            # observes. Callers must commit on this path, not roll back.
             await _record_transition(
                 self._session,
                 intent,
@@ -221,10 +230,7 @@ class ApprovalCommandService:
                 reason_code="approval_ttl_elapsed",
                 db_now=db_now,
             )
-            # Commit the expiry transition durably: the API request transaction
-            # would otherwise roll it back when the error propagates, leaving a
-            # caller-visible expiry response with unexpired durable state.
-            await self._session.commit()
+            await self._session.flush()
             raise ApprovalExpiredError("approval window elapsed")
 
         policy_row = (
