@@ -256,7 +256,9 @@ class ApprovalCommandService:
         if required_roles:
             level_role = _required_role_for_level(route, command.level, required_roles)
             if level_role is None or level_role not in roles:
-                raise ForbiddenError("actor does not hold the role required for this approval level")
+                raise ForbiddenError(
+                    "actor does not hold the role required for this approval level"
+                )
 
         if command.decision is ApprovalDecision.APPROVE:
             self._enforce_scopes(command.actor.scopes, policy_row.required_scopes)
