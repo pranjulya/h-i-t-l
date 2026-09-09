@@ -16,7 +16,6 @@ implementation
 tests
 .github
 compose.yaml
-README.md
 CONTRIBUTING.md
 LICENSE
 *.log
