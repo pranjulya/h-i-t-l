@@ -111,6 +111,50 @@ def test_hostile_context_cannot_bypass_validation() -> None:
     assert response.status_code == 422
 
 
+def test_agent_replay_and_retry_invoke_provider_once() -> None:
+    """Reservation precedes the LLM call: duplicate and concurrent requests bill once."""
+
+    settings = api_settings()
+    reset_schema(settings.database_url)
+    run_alembic_upgrade(settings.database_url, "head")
+    proposal = {
+        "tool": "scale_service",
+        "parameters": {"environment": "staging", "service": "api", "replicas": 4},
+        "rationale": "cpu saturation",
+    }
+    calls: list[str] = []
+
+    class CountingProvider:
+        async def propose(self, request_text: str, context: dict) -> dict:
+            calls.append(request_text)
+            return proposal
+
+    application = create_app(api_settings())
+    application.state.orchestrator = AgentOrchestrator(CountingProvider())
+    with TestClient(application) as client:
+        first = client.post(
+            "/v1/agent/intents",
+            json={"request": "scale api to 4 replicas", "context_refs": {}},
+            headers={**bearer(), "Idempotency-Key": "agent-once"},
+        )
+        replay = client.post(
+            "/v1/agent/intents",
+            json={"request": "scale api to 4 replicas", "context_refs": {}},
+            headers={**bearer(), "Idempotency-Key": "agent-once"},
+        )
+        conflict = client.post(
+            "/v1/agent/intents",
+            json={"request": "scale api to 5 replicas", "context_refs": {}},
+            headers={**bearer(), "Idempotency-Key": "agent-once"},
+        )
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json()["intent_id"] == first.json()["intent_id"]
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
+    assert len(calls) == 1
+
+
 def test_agent_path_feeds_the_worker_to_execution() -> None:
     settings = api_settings()
     reset_schema(settings.database_url)
