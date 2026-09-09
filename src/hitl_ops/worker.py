@@ -140,11 +140,14 @@ async def _claim(
     """Claim and revalidate, committing the EXECUTING state durably."""
 
     try:
-        async with session_factory() as session, session.begin():
+        async with session_factory() as session:
             bundle = await PolicyBundleRepository(session).get_active(tenant_id)
             if bundle is None:
                 return None
             revalidation = RevalidationService(session)
+            # claim_and_revalidate manages its own transactions: it commits
+            # phase 1 (claim), fetches the target unlocked, then opens a fresh
+            # transaction for phase 3. No outer transaction may wrap it.
             permit = await revalidation.claim_and_revalidate(
                 tenant_id=tenant_id,
                 intent_id=intent_id,

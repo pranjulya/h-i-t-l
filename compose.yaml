@@ -13,14 +13,51 @@ services:
       timeout: 3s
       retries: 10
 
+  migrate:
+    build: .
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://hitl:hitl@db:5432/hitl_ops
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  bootstrap:
+    build: .
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://hitl:hitl@db:5432/hitl_ops
+    command: ["python", "-m", "hitl_ops.bootstrap"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   app:
     build: .
     environment:
       APP_ENV: development
       LOG_LEVEL: INFO
       DATABASE_URL: postgresql+asyncpg://hitl:hitl@db:5432/hitl_ops
+      IDENTITY_SHARED_SECRET: learning-demo-identity-secret
     ports:
       - "8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      bootstrap:
+        condition: service_completed_successfully
+
+  worker:
+    build: .
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://hitl:hitl@db:5432/hitl_ops
+      WORKER_TICK_INTERVAL_SECONDS: "5"
+    command: ["python", "-m", "hitl_ops.worker_main"]
+    depends_on:
+      bootstrap:
+        condition: service_completed_successfully

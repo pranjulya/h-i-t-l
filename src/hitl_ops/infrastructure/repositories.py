@@ -89,6 +89,12 @@ class IntentRepository:
             created_at=now,
         )
 
+    async def get(self, tenant_id: str, intent_id: uuid.UUID, revision: int) -> ActionIntentORM:
+        row = await self._session.get(ActionIntentORM, (tenant_id, intent_id, revision))
+        if row is None:
+            raise LookupError("intent revision not found")
+        return row
+
 
 ROUTE_STATE_BY_DISPOSITION: dict[PolicyDisposition, IntentState] = {
     PolicyDisposition.ALLOW: IntentState.AUTO_APPROVED,

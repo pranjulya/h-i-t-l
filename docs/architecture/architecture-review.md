@@ -1,7 +1,7 @@
 # Architecture Review and Readiness Checklist
 
-**Review result:** READY_FOR_USER_REVIEW; NOT APPROVED_FOR_IMPLEMENTATION  
-**Reviewed scope:** Planning documents only.
+**Review result:** READY_FOR_USER_REVIEW — all phases implemented and `TESTED`; release evidence appended in §11.  
+**Reviewed scope:** Planning documents (§1–§10) plus the implemented system's release evidence (§11).
 
 ## 1. Consistency review
 
@@ -13,7 +13,7 @@
 | Approved intent is immutable | Pass | Revision + canonical digest design |
 | State names/transitions align | Pass | State machine is authoritative; LLD consumes it |
 | Phase dependencies are acyclic | Pass | 00→01→02→03→04→05→06→07→08→09 |
-| Planning is separated from implementation | Pass | All phases `NOT_STARTED`; no application source created |
+| Planning is separated from implementation | Pass | Phases 00–09 implemented in sequence; release evidence in §11 |
 
 ## 2. Scope and simplicity
 
@@ -87,5 +87,46 @@ These are intentionally resolved at the named ADR gate, not left ambiguous: sele
 
 ## 10. Approval gate
 
-Implementation may begin only when the user approves this package. On approval, Phase 00 moves from `NOT_STARTED` to `IN_PROGRESS`; no later phase begins until its prerequisites and preceding review gate pass.
+Implementation was approved by the user; phases 00–09 were implemented and
+tested in sequence, with each phase's review gate satisfied before the next
+began. Final acceptance follows the user's end-to-end review.
 
+
+## 11. Release evidence (Phase 09)
+
+Evidence mapping for the PRD §11 success criteria and the checklists above.
+All suites run with `uv run pytest -q` (unit + contract + integration + e2e +
+security + failure) against PostgreSQL 16.
+
+| PRD success criterion | Evidence |
+|---|---|
+| Every V1 tool follows its required approval route under tested policies | `tests/unit/test_risk_policy_matrix.py`, `tests/e2e/test_e2e_journeys.py` |
+| One-byte material change → new digest, stale approvals | `tests/integration/test_concurrent_claim.py::test_one_byte_material_change_stales_the_claim`, `tests/unit/test_canonical_intent.py` |
+| Two concurrent executions → at most one adapter invocation | `tests/integration/test_concurrent_claim.py`, `tests/failure/test_worker_crash.py` |
+| Replayed API calls return the original result or a deterministic conflict | `tests/api/test_intent_routes.py`, `tests/integration/test_idempotency_transactions.py` |
+| Self-approval and duplicate CRITICAL approvers rejected | `tests/integration/test_approval_transactions.py` |
+| Policy/authorization changes observed during revalidation | `tests/integration/test_policy_auth_refresh.py` |
+| Crash after provider send → reconciliation, not blind retry | `tests/integration/test_reconciliation.py`, `tests/failure/test_worker_crash.py` |
+| Audit reconstruction answers who/what/when/why/version/outcome | `tests/integration/test_audit_ordering.py`, `tests/e2e/test_e2e_journeys.py::test_audit_chain_reconstructs_the_journey`, `docs/operations/runbooks.md` |
+
+Threat-model controls: `tests/security/`, `tests/failure/`, residual risks in
+`docs/architecture/threat-model.md` §9. Release gates: `docs/operations/release-checklist.md`.
+
+## 12. Known limitations (learning/demo scope)
+
+The following are explicitly not production claims until tests genuinely
+establish them:
+
+- Production OIDC/JWKS identity: the service validates HS256 test-issuer
+  tokens; asymmetric trust, issuer discovery, and key rotation are not
+  implemented.
+- Full observability and alerts: in-process counters and JSON logs exist, but
+  no exporter, endpoint, dashboards, or alert rules ship with this repo.
+- Executing-lease recovery bounds: recovery honors an expired
+  EXECUTING lease via reconciliation, but lease durations and scheduler
+  cadence are deployment configuration, not proven production values.
+
+Crash recovery after provider send, adapter precondition enforcement, and
+the Compose topology are covered by `tests/failure/test_worker_crash.py`,
+`tests/contract/test_adapter_contract.py`, and the CI `compose-smoke` job
+respectively.

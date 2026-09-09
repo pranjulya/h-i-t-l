@@ -32,6 +32,7 @@ class ActionIntentORM(Base):
     __tablename__ = "action_intents"
     __table_args__ = (
         CheckConstraint("revision >= 1", name="ck_action_intents_revision_positive"),
+        CheckConstraint("state_version >= 1", name="ck_action_intents_state_version_positive"),
         Index("ix_action_intents_digest", "intent_digest"),
     )
 
@@ -271,6 +272,9 @@ class ApprovalDecisionORM(Base):
             unique=True,
             postgresql_where=text("decision = 'APPROVE'"),
         ),
+        CheckConstraint("level IN (1, 2)", name="ck_approval_decisions_level"),
+        CheckConstraint("decision IN ('APPROVE', 'REJECT')", name="ck_approval_decisions_decision"),
+        CheckConstraint("intent_revision >= 1", name="ck_approval_decisions_revision_positive"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -327,6 +331,12 @@ class ExecutionORM(Base):
         ),
         UniqueConstraint("operation_key", name="uq_executions_operation_key"),
         Index("ix_executions_claim_lease", "status", "claim_expires_at"),
+        CheckConstraint("attempt >= 1", name="ck_executions_attempt_positive"),
+        CheckConstraint("intent_revision >= 1", name="ck_executions_revision_positive"),
+        CheckConstraint(
+            "status IN ('CLAIMED', 'EXECUTING', 'SUCCEEDED', 'FAILED', 'UNKNOWN')",
+            name="ck_executions_status",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
