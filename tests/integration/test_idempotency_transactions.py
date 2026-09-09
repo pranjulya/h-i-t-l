@@ -116,20 +116,19 @@ async def test_concurrent_same_key_inserts_have_one_winner(
 
     async def attempt() -> str:
         async with maker() as session, session.begin():
-            try:
-                await IdempotencyService(session).begin(
-                    tenant_id="tenant-1",
-                    actor_id="user-1",
-                    scope="intents",
-                    key="race-key",
-                    request_payload={"replicas": 4},
-                )
-                return "reserved"
-            except IntegrityError:
-                return "conflicted"
+            reservation = await IdempotencyService(session).begin(
+                tenant_id="tenant-1",
+                actor_id="user-1",
+                scope="intents",
+                key="race-key",
+                request_payload={"replicas": 4},
+            )
+            if reservation.replayed:
+                return "replayed"
+            return "reserved"
 
     results = await asyncio.gather(attempt(), attempt())
-    assert sorted(results) == ["conflicted", "reserved"]
+    assert sorted(results) == ["replayed", "reserved"]
 
 
 async def test_scope_and_actor_partition_keys(migrated_database: str, engine: AsyncEngine) -> None:

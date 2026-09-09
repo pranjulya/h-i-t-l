@@ -182,7 +182,10 @@ async def create_approved_intent(
     version = pending["expected_state_version"]
     for level, approver in zip(levels, approvers, strict=False):
         actor = AuthenticatedActor(
-            actor_id=approver, tenant_id=tenant_id, correlation_id="corr-test"
+            actor_id=approver,
+            tenant_id=tenant_id,
+            correlation_id="corr-test",
+            scopes=frozenset({"ops:write", "ops:read"}),
         )
         snapshot = await ApprovalCommandService(session).decide(
             ApprovalDecisionCommand(
@@ -196,6 +199,10 @@ async def create_approved_intent(
                 expected_state_version=version,
                 actor=actor,
                 command_id=uuid.uuid4().hex,
+                obligations={
+                    "announce_in_incident_channel": "inc-123",
+                    "require_change_ticket": "CHG-123",
+                },
             )
         )
         version = snapshot.state_version

@@ -102,24 +102,52 @@ def route_stricter(current: ApprovalRoute, original: ApprovalRoute) -> bool:
     return order.index(current) > order.index(original)
 
 
+def policy_stricter(current: Any, original: Any) -> bool:
+    """True when the current policy is materially stricter than the stored one.
+
+    Beyond disposition/route, same-route tightening must stale an approval:
+    additional required roles or scopes, additional obligations, or a shorter
+    approval TTL all raise the bar for the already-approved intent.
+    """
+
+    if is_stricter(current.disposition.value, str(original.disposition)):
+        return True
+    if route_stricter(current.route, ApprovalRoute(original.route)):
+        return True
+    if not set(current.required_roles) <= set(original.required_roles):
+        return True
+    if not set(current.required_scopes) <= set(original.required_scopes):
+        return True
+    if not set(current.obligations) <= set(original.obligations):
+        return True
+    current_ttl = current.approval_ttl_seconds
+    original_ttl = original.approval_ttl_seconds
+    return current_ttl is not None and original_ttl is not None and current_ttl < original_ttl
+
+
+_TARGET_IDENTITY_FIELDS = ("service", "resource_id", "name")
+
+
 def check_preconditions(
     tool: str, parameters: dict[str, Any], snapshot: TargetSnapshot
 ) -> str | None:
-    """Deterministic precondition comparison; returns a failure reason or None."""
+    """Deterministic precondition comparison; returns a failure reason or None.
+
+    Fail-closed: when the approved intent names an exact target field, the live
+    snapshot must carry that same field and it must match. A missing identity
+    field is treated as a replaced/unknown target, never as a silent pass.
+    """
 
     if not snapshot.found:
         return "target_missing"
     if snapshot.health == "degraded":
         return "target_degraded"
-    service = parameters.get("service")
-    if service is not None and snapshot.identity.get("service") not in (None, service):
-        return "target_replaced"
-    resource_id = parameters.get("resource_id")
-    if resource_id is not None and snapshot.identity.get("resource_id") not in (None, resource_id):
-        return "target_replaced"
-    name = parameters.get("name")
-    if name is not None and snapshot.identity.get("name") not in (None, name):
-        return "target_replaced"
+    for field in _TARGET_IDENTITY_FIELDS:
+        expected = parameters.get(field)
+        if expected is not None:
+            actual = snapshot.identity.get(field)
+            if actual != expected:
+                return "target_replaced"
     return None
 
 
@@ -423,9 +451,9 @@ class RevalidationService:
         if current_policy.disposition is PolicyDisposition.BLOCK:
             return fail(IntentState.STALE, "policy_now_blocks")
         if (
-            is_stricter(current_policy.disposition.value, policy_row.disposition)
-            or route_stricter(current_policy.route, route)
-        ) and current_policy.disposition is not PolicyDisposition.ALLOW:
+            policy_stricter(current_policy, policy_row)
+            and current_policy.disposition is not PolicyDisposition.ALLOW
+        ):
             return fail(IntentState.STALE, "policy_route_stricter")
         # Gate 4: live target preconditions (bounded, read-only).
         snapshot = await target_query.fetch(tool, intent.canonical_parameters)
