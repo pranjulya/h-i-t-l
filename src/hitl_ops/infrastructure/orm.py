@@ -248,12 +248,24 @@ class ApprovalDecisionORM(Base):
 
 class RoleAssignmentORM(Base):
     __tablename__ = "role_assignments"
+    __table_args__ = (
+        Index(
+            "uq_role_assignments_active_grant",
+            "tenant_id",
+            "principal_id",
+            "role",
+            "environments_key",
+            unique=True,
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id: Mapped[str] = mapped_column(String(63), nullable=False)
     principal_id: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(63), nullable=False)
     environments: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    environments_key: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     valid_from: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

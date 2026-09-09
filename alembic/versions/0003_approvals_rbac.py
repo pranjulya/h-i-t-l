@@ -57,6 +57,7 @@ def upgrade() -> None:
         sa.Column("principal_id", sa.String(length=255), nullable=False),
         sa.Column("role", sa.String(length=63), nullable=False),
         sa.Column("environments", pg.JSONB(), nullable=True),
+        sa.Column("environments_key", sa.String(length=512), nullable=False, server_default=""),
         sa.Column(
             "valid_from",
             sa.DateTime(timezone=True),
@@ -68,9 +69,17 @@ def upgrade() -> None:
         sa.Column("granted_by", sa.String(length=255), nullable=False),
         sa.PrimaryKeyConstraint("id", name="pk_role_assignments"),
     )
+    op.create_index(
+        "uq_role_assignments_active_grant",
+        "role_assignments",
+        ["tenant_id", "principal_id", "role", "environments_key"],
+        unique=True,
+        postgresql_where=sa.text("revoked_at IS NULL"),
+    )
 
 
 def downgrade() -> None:
     op.drop_index("uq_approval_decisions_approving_actor", table_name="approval_decisions")
+    op.drop_index("uq_role_assignments_active_grant", table_name="role_assignments")
     op.drop_table("role_assignments")
     op.drop_table("approval_decisions")
