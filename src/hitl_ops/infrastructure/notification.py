@@ -6,11 +6,14 @@ threat model's notification-deception control); model rationale never appears.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from hitl_ops.observability.telemetry import metrics
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +59,13 @@ class LoggingNotificationSink:
             ),
         )
         metrics.increment("notifications_sent", sink="logging")
-        _ = message
+        logger.info(
+            "approval notification %s for intent %s revision %s: %s",
+            notification_id,
+            intent_id,
+            revision,
+            message.body,
+        )
         return notification_id
 
 
