@@ -203,3 +203,39 @@ async def test_live_target_gates_stale_the_claim(
         )
     assert failure is not None
     assert failure.reason_code == "target_degraded"
+
+
+async def test_orphan_execution_is_rejected(migrated_database: str, engine: AsyncEngine) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        session.add(
+            ExecutionORM(
+                tenant_id="tenant-1",
+                intent_id=uuid.uuid4(),
+                intent_revision=1,
+                operation_key=f"tenant-1:{uuid.uuid4()}:1",
+                attempt=1,
+                status="CLAIMED",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.flush()
+        await session.rollback()
+
+
+async def test_execution_foreign_key_exists_in_schema(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    from sqlalchemy import inspect
+
+    async with engine.connect() as connection:
+        foreign_keys = await connection.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_foreign_keys("executions")
+        )
+    assert any(
+        foreign_key["constrained_columns"] == ["tenant_id", "intent_id", "intent_revision"]
+        and foreign_key["referred_table"] == "action_intents"
+        for foreign_key in foreign_keys
+    )

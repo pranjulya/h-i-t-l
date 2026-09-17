@@ -37,6 +37,11 @@ def upgrade() -> None:
         sa.Column("error_code", sa.String(length=64), nullable=True),
         sa.Column("result_summary", pg.JSONB(), nullable=True),
         sa.PrimaryKeyConstraint("id", name="pk_executions"),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "intent_id", "intent_revision"],
+            ["action_intents.tenant_id", "action_intents.intent_id", "action_intents.revision"],
+            name="fk_executions_intent_revision",
+        ),
         sa.UniqueConstraint(
             "tenant_id", "intent_id", "intent_revision", name="uq_executions_revision"
         ),
