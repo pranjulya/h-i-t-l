@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from hitl_ops.adapters.demo import DemoInfrastructureAdapter
 from hitl_ops.api.app import create_app
+from hitl_ops.infrastructure.notification import RecordingNotificationSink
 from tests.api.conftest import api_settings, bearer
 
 
@@ -54,69 +55,49 @@ async def test_adapter_timeout_enters_unknown_never_failed() -> None:
     raise AssertionError("expected timeout")
 
 
-async def test_audit_sink_failure_leaves_primary_state_intact() -> None:
-    from datetime import UTC, datetime
+async def test_audit_sink_failure_leaves_primary_state_intact(failure_database, engine) -> None:
+    """An audit sink outage must not raise out of the publisher or lose the row.
 
-    from sqlalchemy.ext.asyncio import AsyncSession
+    The row stays unpublished with attempt metadata so the next pass retries it.
+    """
+
+    import uuid
+
+    from sqlalchemy import select
 
     from hitl_ops.infrastructure.audit import AuditWriter
-    from hitl_ops.infrastructure.notification import FailingNotificationSink
+    from hitl_ops.infrastructure.database import build_sessionmaker
     from hitl_ops.infrastructure.orm import OutboxMessageORM
     from hitl_ops.infrastructure.outbox import OutboxPublisher
 
     class ExplodingWriter(AuditWriter):
-        async def append(self, **kwargs: object) -> None:
+        async def append(self, **kwargs: object) -> None:  # type: ignore[override]
             raise RuntimeError("audit sink unavailable")
 
-    session = None
-    _ = session  # type checker: the publisher must work on any session shape
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        session.add(
+            OutboxMessageORM(
+                topic="intent.created",
+                payload={
+                    "tenant_id": "tenant-1",
+                    "intent_id": str(uuid.uuid4()),
+                    "revision": 1,
+                },
+            )
+        )
+
     publisher = OutboxPublisher(
-        None,  # type: ignore[arg-type]
-        ExplodingWriter(None),  # type: ignore[arg-type]
-        FailingNotificationSink(),
+        maker,
+        RecordingNotificationSink(),
+        audit_writer_factory=ExplodingWriter,
     )
-    # A failing audit sink must not raise out of publish_pending; the row stays
-    # pending with attempt metadata for retry.
-    row = OutboxMessageORM(
-        topic="intent.created",
-        payload={
-            "tenant_id": "t",
-            "intent_id": "00000000-0000-0000-0000-000000000000",
-            "revision": 1,
-        },
-    )
-    publisher._session = _Recorder([row])
     stats = await publisher.publish_pending()
     assert stats["failed"] >= 1
-    assert row.published_at is None
-    assert row.attempts == 1
-    assert row.next_attempt_at is not None
-    _ = datetime.now(UTC), AsyncSession
 
-
-class _Result:
-    def __init__(self, rows: list) -> None:
-        self._rows = rows
-
-    def scalars(self) -> _Result:
-        return self
-
-    def all(self) -> list:
-        return self._rows
-
-
-class _Recorder:
-    """Minimal session stand-in serving the pending row to the publisher."""
-
-    def __init__(self, rows: list) -> None:
-        self._rows = rows
-        self.added: list = []
-
-    def add(self, obj: object) -> None:
-        self.added.append(obj)
-
-    async def flush(self) -> None:
-        return None
-
-    async def execute(self, *args: object, **kwargs: object) -> _Result:
-        return _Result(self._rows)
+    async with maker() as session, session.begin():
+        row = (await session.execute(select(OutboxMessageORM))).scalars().one()
+        assert row.published_at is None
+        assert row.attempts == 1
+        assert row.next_attempt_at is not None
+        assert row.claim_expires_at is None

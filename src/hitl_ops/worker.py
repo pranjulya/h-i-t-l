@@ -59,8 +59,13 @@ async def run_worker_tick(
 
     stats = {"executed": 0, "reconciled": 0, "skipped": 0}
 
+    # Recovery runs before the snapshot so executions it moves to UNKNOWN are
+    # reconciled by the single scheduler below, within this same pass.
+    recovered = await _recover_stale_executing(session_factory)
+    stats["recovered"] = recovered
+
     # Snapshot due unknowns before executing: reconciliation is a separate pass
-    # and must not immediately resolve what this same tick just marked unknown.
+    # and must not immediately resolve what this same tick just timed out.
     async with session_factory() as session:
         pending_unknowns = (
             (
@@ -104,9 +109,6 @@ async def run_worker_tick(
             stats["executed"] += 1
         else:
             stats["skipped"] += 1
-
-    recovered = await _recover_stale_executing(session_factory)
-    stats["recovered"] = recovered
 
     for execution_id in pending_unknowns:
         command_id = uuid.uuid4().hex

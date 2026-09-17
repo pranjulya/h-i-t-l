@@ -16,6 +16,7 @@ deterministically from the intent.
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -54,12 +55,14 @@ class OutboxPublisher:
         batch_limit: int = 100,
         retry_backoff_seconds: int = 5,
         claim_lease_seconds: int = 60,
+        audit_writer_factory: Callable[[AsyncSession], AuditWriter] = AuditWriter,
     ) -> None:
         self._session_factory = session_factory
         self._notifier = notifier
         self._batch_limit = batch_limit
         self._retry_backoff_seconds = retry_backoff_seconds
         self._claim_lease_seconds = claim_lease_seconds
+        self._audit_writer_factory = audit_writer_factory
 
     async def publish_pending(self, *, worker_id: str = "outbox-publisher") -> dict[str, int]:
         stats = {"audited": 0, "notified": 0, "failed": 0}
@@ -193,7 +196,7 @@ class OutboxPublisher:
                 "administration.", "administration_"
             ),
         )
-        await AuditWriter(session).append(
+        await self._audit_writer_factory(session).append(
             tenant_id=payload.get("tenant_id", "tenant-1"),
             aggregate_id=aggregate_id,
             aggregate_revision=int(payload.get("revision", 1)),

@@ -88,6 +88,98 @@ async def test_provider_success_then_crash_recovers_via_worker_tick(
     assert len([k for k in restarted._operations if str(pending["intent_id"]) in k]) == 1
 
 
+async def test_a_recovered_execution_is_reconciled_once_per_tick(
+    failure_database, engine: AsyncEngine
+) -> None:
+    """Exactly one path reconciles: recovery schedules, the tick reconciles.
+
+    An execution that is UNKNOWN with the recovery marker still set used to
+    match both the pending-unknowns scan and the recovery query, so the
+    provider was polled twice for the same execution on every tick.
+    """
+
+    from hitl_ops.worker import run_worker_tick
+
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        pending = await create_approved_intent(session, tool="scale_service", parameters=_SCALE)
+
+    # State left behind by an earlier crashed worker: the intent was recovered
+    # to EXECUTION_UNKNOWN and the recovery marker was never cleared.
+    async with maker() as session, session.begin():
+        intent = await session.get(ActionIntentORM, ("tenant-1", pending["intent_id"], 1))
+        assert intent is not None
+        intent.state = "EXECUTION_UNKNOWN"
+        session.add(
+            ExecutionORM(
+                tenant_id="tenant-1",
+                intent_id=pending["intent_id"],
+                intent_revision=1,
+                operation_key=f"tenant-1:{pending['intent_id']}:1",
+                attempt=1,
+                status="UNKNOWN",
+                error_code="executing_lease_expired",
+            )
+        )
+
+    calls: list[str] = []
+
+    class CountingAdapter(DemoInfrastructureAdapter):
+        async def lookup_status(self, tool, operation_key, provider_operation_id):  # type: ignore[no-untyped-def]
+            calls.append(operation_key)
+            return await super().lookup_status(tool, operation_key, provider_operation_id)
+
+    await run_worker_tick(maker, CountingAdapter())
+
+    assert len(calls) == 1
+
+
+async def test_recovery_work_is_bounded_per_tick(failure_database, engine: AsyncEngine) -> None:
+    """The recovery query is batched, so a backlog cannot inflate one tick."""
+
+    from hitl_ops.worker import _TICK_LIMIT, run_worker_tick
+
+    maker = build_sessionmaker(engine)
+    expired = datetime.now(UTC) - timedelta(seconds=3600)
+    backlog = _TICK_LIMIT + 4
+
+    async with maker() as session, session.begin():
+        for _ in range(backlog):
+            intent_id = uuid.uuid4()
+            session.add(
+                ActionIntentORM(
+                    tenant_id="tenant-1",
+                    intent_id=intent_id,
+                    revision=1,
+                    tool="scale_service",
+                    canonical_parameters=_SCALE,
+                    intent_digest="d" * 64,
+                    requester_id="user-1",
+                    requester_rationale="r",
+                    source="DIRECT",
+                    state="EXECUTING",
+                    state_version=2,
+                )
+            )
+            session.add(
+                ExecutionORM(
+                    tenant_id="tenant-1",
+                    intent_id=intent_id,
+                    intent_revision=1,
+                    operation_key=f"tenant-1:{intent_id}:1",
+                    attempt=1,
+                    status="EXECUTING",
+                    started_at=expired,
+                    claim_expires_at=expired,
+                )
+            )
+
+    stats = await run_worker_tick(maker, DemoInfrastructureAdapter())
+
+    assert stats["recovered"] == _TICK_LIMIT
+    assert stats["recovered"] < backlog
+
+
 async def test_crash_without_provider_evidence_stays_unknown(
     failure_database, engine: AsyncEngine
 ) -> None:
