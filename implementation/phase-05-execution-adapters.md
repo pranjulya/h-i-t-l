@@ -1,6 +1,6 @@
 # Phase 05 — Execution Service, Adapter, and Reconciliation
 
-**Status:** NOT_STARTED
+**Status:** TESTED — implemented with shared adapter contract tests (all five tools), crash/ambiguity/reconciliation integration tests, deterministic demo adapter, Ruff, and strict mypy; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
 
 ## Goal
 

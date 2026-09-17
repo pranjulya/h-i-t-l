@@ -53,8 +53,8 @@ def test_readiness_fails_closed_on_migration_mismatch(
     versions.mkdir(parents=True)
     ini = root / "alembic.ini"
     ini.write_text(f"[alembic]\nscript_location = {root / 'alembic'}\n", encoding="utf-8")
-    (versions / "0001_initial.py").write_text(
-        'revision = "0001"\ndown_revision = None\nbranch_labels = None\ndepends_on = None\n',
+    (versions / "ffff_fake_head.py").write_text(
+        'revision = "fffffake"\ndown_revision = None\nbranch_labels = None\ndepends_on = None\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("ALEMBIC_INI", str(ini))
@@ -72,8 +72,8 @@ async def test_verify_migration_head_raises_on_mismatch(
     versions.mkdir(parents=True)
     ini = root / "alembic.ini"
     ini.write_text(f"[alembic]\nscript_location = {root / 'alembic'}\n", encoding="utf-8")
-    (versions / "0001_initial.py").write_text(
-        'revision = "0001"\ndown_revision = None\nbranch_labels = None\ndepends_on = None\n',
+    (versions / "ffff_fake_head.py").write_text(
+        'revision = "fffffake"\ndown_revision = None\nbranch_labels = None\ndepends_on = None\n',
         encoding="utf-8",
     )
     monkeypatch.setenv("ALEMBIC_INI", str(ini))

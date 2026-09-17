@@ -10,11 +10,13 @@ import enum
 import logging
 from urllib.parse import urlsplit
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _DEFAULT_DATABASE_URL = "postgresql+asyncpg://hitl:hitl@localhost:5432/hitl_ops"
 _REJECTED_PRODUCTION_PASSWORDS = frozenset({"hitl", "postgres", "password", "changeme", ""})
+_MAX_REQUEST_BYTES_CEILING = 16 * 1024 * 1024
+_MAX_RATE_LIMIT_PER_MINUTE = 1_000_000
 
 
 class Environment(enum.StrEnum):
@@ -45,6 +47,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str = _DEFAULT_DATABASE_URL
     otel_exporter_otlp_endpoint: str | None = None
+    identity_issuer: str = "https://test-issuer.local"
+    identity_audience: str = "hitl-ops"
+    identity_shared_secret: str | None = None
+    max_request_bytes: int = Field(default=65536, gt=0, le=_MAX_REQUEST_BYTES_CEILING)
+    rate_limit_per_minute: int = Field(default=120, gt=0, le=_MAX_RATE_LIMIT_PER_MINUTE)
 
     @field_validator("log_level")
     @classmethod
@@ -72,6 +79,8 @@ class Settings(BaseSettings):
             raise ValueError("production requires an explicitly configured DATABASE_URL")
         if _database_password(self.database_url) in _REJECTED_PRODUCTION_PASSWORDS:
             raise ValueError("production rejects default database credentials")
+        if self.identity_shared_secret is None:
+            raise ValueError("production requires configured identity verification material")
         return self
 
     @property

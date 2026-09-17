@@ -22,6 +22,9 @@ from starlette.status import (
     HTTP_500_INTERNAL_SERVER_ERROR,
 )
 
+from hitl_ops.agent.schemas import ParameterValidationError, UnknownToolError
+from hitl_ops.domain.errors import DomainError
+
 _STATUS_CODES: dict[int, str] = {
     HTTP_401_UNAUTHORIZED: "UNAUTHORIZED",
     HTTP_403_FORBIDDEN: "FORBIDDEN",
@@ -114,6 +117,36 @@ def register_error_handlers(app: FastAPI) -> None:
             ),
         )
 
+    @app.exception_handler(DomainError)
+    async def _domain_error(request: Request, exc: DomainError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.http_status,
+            content=error_payload(exc.code, exc.message, exc.retryable, _correlation_id(request)),
+        )
+
+    @app.exception_handler(UnknownToolError)
+    async def _unknown_tool(request: Request, exc: UnknownToolError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content=error_payload(
+                "UNKNOWN_TOOL", "tool is not on the allow-list", False, _correlation_id(request)
+            ),
+        )
+
+    @app.exception_handler(ParameterValidationError)
+    async def _parameter_validation(
+        request: Request, exc: ParameterValidationError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content=error_payload(
+                "VALIDATION_FAILED",
+                "proposal parameters failed validation",
+                False,
+                _correlation_id(request),
+            ),
+        )
+
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         code = _STATUS_CODES.get(exc.status_code, "REQUEST_FAILED")
@@ -124,9 +157,11 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+        # Mutations carry idempotency keys, so a retry after an unexpected
+        # failure is replay-safe.
         return JSONResponse(
             status_code=500,
             content=error_payload(
-                "INTERNAL_ERROR", "Unexpected server error.", False, _correlation_id(request)
+                "INTERNAL_ERROR", "Unexpected server error.", True, _correlation_id(request)
             ),
         )

@@ -73,3 +73,24 @@ Authorized humans may approve harmful actions; provider APIs may lack conditiona
 
 Security tests include injection payloads, unknown fields, cross-tenant UUIDs, revoked approvers, self-approval, role changes before execution, race tests, forged/replayed tokens in a test identity setup, secret-redaction fixtures, audit-chain mutation detection, and ambiguous provider-response recovery.
 
+
+## 9. Residual risk evidence (Phase 08)
+
+Automated evidence for the controls above lives in `tests/security/` and
+`tests/failure/`, with operator procedures in `docs/operations/runbooks.md`.
+
+| Threat | Control evidence | Residual risk |
+|---|---|---|
+| Prompt injection / model overreach | strict schema validation rejects unknown tools/fields (`test_injection`, `test_agent_orchestrator`); invalid proposals create no intent | Model cannot grant authority; provider is disabled by default and replaced wholesale per deployment |
+| Notification deception | notifications render trusted server data only; approvals accepted only in the authenticated API (`test_notification_publisher`, `test_notification_delivery`) | Receiver compromise is out of scope; notification is convenience, never authorization |
+| Cross-tenant enumeration | identical `NOT_FOUND` bodies and codes for foreign and missing intents (`test_tenancy`) | Timing side channels not measured in V1 |
+| Forged/expired identity | issuer/audience/signature/time claims enforced; failures fail closed (`test_tokens`) | Production JWKS rotation is an ADR-008 deployment task |
+| Revoked or scoped authority | decisions and revalidation evaluate current DB assignments with validity windows and environment scopes (`test_tokens`, `test_policy_auth_refresh`) | Assignment administration is trusted-operator bound; changes are audited |
+| Dynamic execution / SSRF | adapters accept typed commands only; no URL/host fields; credential-shaped payloads rejected pre-send (`test_dynamic_execution_denial`) | Real cloud adapters must keep the same rejection tests in their contract suites |
+| Secret exposure | raw proposals and result summaries redacted and size-bounded before persistence (`test_redaction`); error envelopes sanitized | Log aggregation endpoints are deployment-owned |
+| Audit rewrite | append-only at the application layer and by a database trigger; hash chain detects edits/gaps (`test_audit_ordering`, `test_transactional_outbox`) | An attacker with direct database superuser access is out of threat scope |
+| Dependency loss (DB, LLM, adapter, sink) | fail-closed mutation semantics verified; outbox retries without corrupting state; unknown outcomes preserved (`test_database_outage`, `test_llm_outage`, runbooks RB-1/RB-3/RB-5) | Prolonged PostgreSQL loss halts the service by design; recovery objective equals database RTO |
+| Worker death at execution boundaries | claim leases recover abandoned claims; at-most-one logical provider operation per revision (`test_worker_crash`, `test_concurrent_claim`) | Reconciliation depends on provider status-lookup cooperation (ADR-010) |
+
+Accepted residual risks require explicit user sign-off during the end-to-end
+review; unresolved high risks block release (PRD §12).
