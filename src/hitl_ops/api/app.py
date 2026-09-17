@@ -48,6 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await engine.dispose()
 
     rate_limiter = SlidingWindowRateLimiter(resolved.rate_limit_per_minute)
+    address_limiter = SlidingWindowRateLimiter(resolved.address_rate_limit_per_minute)
     app = FastAPI(title="HITL AI Ops", version="0.1.0", lifespan=lifespan)
     app.state.settings = resolved
     app.state.rate_limiter = rate_limiter
@@ -67,11 +68,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         correlation_id = request.headers.get("X-Correlation-ID") or uuid.uuid4().hex
         request.state.correlation_id = correlation_id
 
-        # Only unauthenticated traffic is keyed by client address. Authenticated
-        # requests are limited per principal in get_actor, so users sharing a
-        # proxy or NAT address do not throttle one another.
-        if request.headers.get("authorization") is None and not rate_limiter.allow(
-            f"anonymous:{request.client.host if request.client else 'unknown'}"
+        # Address backstop for every request, including ones carrying a forged
+        # or unverifiable token: authentication happens in a route dependency,
+        # so a request rejected there never reaches the per-principal limiter.
+        # The limit is deliberately higher than the per-principal one so that
+        # many callers sharing a proxy or NAT address are not throttled by each
+        # other's traffic.
+        if not address_limiter.allow(
+            f"address:{request.client.host if request.client else 'unknown'}"
         ):
             return JSONResponse(
                 status_code=429,
@@ -83,6 +87,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "correlation_id": correlation_id,
                         "details": {},
                     }
+                },
+                headers={
+                    "X-Correlation-ID": correlation_id,
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Frame-Options": "DENY",
+                    "Cache-Control": "no-store",
                 },
             )
         response = await call_next(request)

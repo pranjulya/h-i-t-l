@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     identity_shared_secret: str | None = None
     max_request_bytes: int = Field(default=65536, gt=0, le=_MAX_REQUEST_BYTES_CEILING)
     rate_limit_per_minute: int = Field(default=120, gt=0, le=_MAX_RATE_LIMIT_PER_MINUTE)
+    # Backstop applied per client address to every request, including ones whose
+    # credentials never validate. Kept above the per-principal limit so callers
+    # behind a shared address are not throttled by one another.
+    address_rate_limit_per_minute: int = Field(default=600, gt=0, le=_MAX_RATE_LIMIT_PER_MINUTE)
 
     @field_validator("log_level")
     @classmethod

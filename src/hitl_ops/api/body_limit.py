@@ -41,7 +41,12 @@ class BodySizeLimitMiddleware:
             await self._reject(send, correlation_id)
             return
 
-        buffered = await self._read_within_limit(receive)
+        buffered, disconnected = await self._read_within_limit(receive)
+        if disconnected:
+            # The client went away mid-body: there is nobody to answer, and
+            # replaying a truncated body as if it were complete would turn a
+            # dropped connection into a confusing validation error.
+            return
         if buffered is None:
             await self._reject(send, correlation_id)
             return
@@ -51,26 +56,33 @@ class BodySizeLimitMiddleware:
         async def replay() -> Message:
             nonlocal replayed
             if replayed:
-                return {"type": "http.request", "body": b"", "more_body": False}
+                # Hand the original channel back once the buffered body is
+                # spent, so a later receive() observes a real http.disconnect
+                # rather than being told the body is simply empty again.
+                return await receive()
             replayed = True
             return {"type": "http.request", "body": buffered, "more_body": False}
 
         await self._app(scope, replay, send)
 
-    async def _read_within_limit(self, receive: Receive) -> bytes | None:
-        """Buffer the body, returning None as soon as the cap is exceeded."""
+    async def _read_within_limit(self, receive: Receive) -> tuple[bytes | None, bool]:
+        """Buffer the body.
+
+        Returns ``(body, disconnected)``: ``body`` is ``None`` when the cap is
+        exceeded, and ``disconnected`` is true when the client dropped the
+        connection before the body ended.
+        """
 
         body = bytearray()
         while True:
             message = await receive()
             if message["type"] == "http.disconnect":
-                break
+                return None, True
             body.extend(message.get("body", b""))
             if len(body) > self._max_bytes:
-                return None
+                return None, False
             if not message.get("more_body", False):
-                break
-        return bytes(body)
+                return bytes(body), False
 
     async def _reject(self, send: Send, correlation_id: str) -> None:
         payload = json.dumps(
@@ -82,7 +94,8 @@ class BodySizeLimitMiddleware:
                     "correlation_id": correlation_id,
                     "details": {},
                 }
-            }
+            },
+            separators=(",", ":"),
         ).encode("utf-8")
         await send(
             {
@@ -99,6 +112,8 @@ def _response_headers(payload: bytes, correlation_id: str) -> list[tuple[bytes, 
         "content-type": "application/json",
         "content-length": str(len(payload)),
         "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
     }
     raw: list[tuple[bytes, bytes]] = [
         (key.encode("latin-1"), value.encode("latin-1")) for key, value in headers.items()
