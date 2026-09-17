@@ -29,13 +29,19 @@ logger = logging.getLogger(__name__)
 IDLE_SECONDS = float(os.environ.get("WORKER_TICK_INTERVAL_SECONDS", "5"))
 MAX_BACKOFF_SECONDS = float(os.environ.get("WORKER_MAX_BACKOFF_SECONDS", "60"))
 
+# The backoff is capped long before this, but the exponent must be bounded too:
+# it is evaluated inside the failure handler, so an overflow here would kill
+# the supervisor that exists to survive failures.
+_MAX_BACKOFF_EXPONENT = 20
+
 
 def next_backoff_seconds(failures: int, *, idle_seconds: float = IDLE_SECONDS) -> float:
     """Exponential backoff for consecutive tick failures, capped."""
 
     if failures < 1:
         return idle_seconds
-    backoff: float = idle_seconds * 2 ** (failures - 1)
+    exponent = min(failures - 1, _MAX_BACKOFF_EXPONENT)
+    backoff: float = idle_seconds * 2**exponent
     return min(backoff, MAX_BACKOFF_SECONDS)
 
 
