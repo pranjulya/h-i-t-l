@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy import (
     CheckConstraint,
     DateTime,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -61,6 +62,11 @@ class ActionIntentORM(Base):
 class StateTransitionORM(Base):
     __tablename__ = "state_transitions"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "intent_id", "intent_revision"],
+            ["action_intents.tenant_id", "action_intents.intent_id", "action_intents.revision"],
+            name="fk_state_transitions_intent_revision",
+        ),
         UniqueConstraint("command_id", name="uq_state_transitions_command_id"),
         UniqueConstraint(
             "tenant_id",
