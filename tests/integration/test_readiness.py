@@ -1,42 +1,25 @@
-"""Readiness integration tests against a real PostgreSQL 16."""
+"""Readiness integration tests against a real PostgreSQL 16.
+
+These tests require PostgreSQL via TEST_DATABASE_URL and fail (not skip) when
+it is unreachable: readiness truthfulness is a release gate.
+"""
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from hitl_ops.api.app import create_app
 from hitl_ops.infrastructure.database import (
     MigrationHeadMismatch,
-    build_engine,
     verify_migration_head,
 )
-from tests.conftest import DEFAULT_TEST_DATABASE_URL, make_settings
+from tests.conftest import make_settings
 
 
-def _database_available() -> bool:
-    async def probe() -> None:
-        engine = build_engine(DEFAULT_TEST_DATABASE_URL)
-        try:
-            async with engine.connect() as connection:
-                await connection.execute(text("SELECT 1"))
-        finally:
-            await engine.dispose()
-
-    try:
-        asyncio.run(probe())
-    except Exception:
-        return False
-    return True
-
-
-def test_ready_with_clean_postgres() -> None:
-    if not _database_available():
-        pytest.skip("PostgreSQL unavailable")
+def test_ready_with_clean_postgres(requires_postgres: AsyncEngine) -> None:
+    del requires_postgres
     with TestClient(create_app(make_settings())) as client:
         response = client.get("/health/ready")
     assert response.status_code == 200
@@ -44,10 +27,9 @@ def test_ready_with_clean_postgres() -> None:
 
 
 def test_readiness_fails_closed_on_migration_mismatch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+    requires_postgres: AsyncEngine, monkeypatch: pytest.MonkeyPatch, tmp_path: object
 ) -> None:
-    if not _database_available():
-        pytest.skip("PostgreSQL unavailable")
+    del requires_postgres
     root = tmp_path  # type: ignore[operator]
     versions = root / "alembic" / "versions"
     versions.mkdir(parents=True)

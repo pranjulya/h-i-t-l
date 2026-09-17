@@ -7,6 +7,7 @@ digest and a stable operation key; no client can submit a permit.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -44,6 +45,8 @@ from hitl_ops.infrastructure.orm import (
 )
 
 DEFAULT_CLAIM_LEASE_SECONDS = 60
+DEFAULT_TARGET_FETCH_TIMEOUT_SECONDS = 10.0
+DEFAULT_STATUS_LOOKUP_TIMEOUT_SECONDS = 10.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +304,9 @@ class RevalidationService:
         bundle: PolicyBundle,
         lease_seconds: int,
     ) -> ExecutionPermit | RevalidationFailure:
+        # Phase 1 (locked): claim the row and persist REVALIDATING. The lock is
+        # released at flush; the unbounded target fetch in phase 2 never runs
+        # under a held row lock.
         row = (
             await self._session.execute(
                 select(ActionIntentORM, func.now())
@@ -363,56 +369,159 @@ class RevalidationService:
         )
         await self._session.flush()
 
-        failure = await self._revalidate_gates(
-            intent, execution, db_now, bundle, target_query, worker_id, command_id
-        )
-        if failure is not None:
+        # Phase 2 (unlocked): fetch the live target with no row lock held.
+        # The phase-1 claim transaction is committed here, releasing the lock
+        # before the unbounded network call. Caller-managed transactions are
+        # required: this method commits phase 1 and returns phase 3 results
+        # in a new transaction owned by the same session.
+        tool = ToolName(intent.tool)
+        parameters = dict(intent.canonical_parameters)
+        await self._session.commit()
+        try:
+            snapshot = await asyncio.wait_for(
+                target_query.fetch(tool, parameters),
+                timeout=DEFAULT_TARGET_FETCH_TIMEOUT_SECONDS,
+            )
+        except TimeoutError:
+            return await self._fail_after_fetch_timeout(
+                tenant_id, intent_id, revision, worker_id, command_id
+            )
+
+        # Phase 3 (locked): re-lock and revalidate gates 1-3 plus the fetched
+        # snapshot against current durable state, in a fresh transaction.
+        async with self._session.begin():
+            row = (
+                await self._session.execute(
+                    select(ActionIntentORM, func.now())
+                    .where(
+                        ActionIntentORM.tenant_id == tenant_id,
+                        ActionIntentORM.intent_id == intent_id,
+                        ActionIntentORM.revision == revision,
+                    )
+                    .with_for_update(nowait=True)
+                )
+            ).first()
+            if row is None:
+                raise NotFoundError("intent revision not found")
+            intent, db_now = row
+            if IntentState(intent.state) is not IntentState.REVALIDATING:
+                raise StateConflictError(f"claim lost while fetching target: {intent.state}")
+            execution = (
+                await self._session.execute(
+                    select(ExecutionORM).where(
+                        ExecutionORM.intent_id == intent_id,
+                        ExecutionORM.intent_revision == revision,
+                    )
+                )
+            ).scalar_one()
+
+            failure = await self._revalidate_gates(
+                intent, execution, db_now, bundle, snapshot, worker_id, command_id
+            )
+            if failure is not None:
+                await _record_transition(
+                    self._session,
+                    intent,
+                    failure.state,
+                    actor_id=worker_id,
+                    command_id=command_id,
+                    reason_code=failure.reason_code,
+                    db_now=db_now,
+                )
+                execution.status = "FAILED"
+                execution.error_code = failure.reason_code
+                execution.finished_at = db_now
+                await self._session.flush()
+                return failure
+
             await _record_transition(
                 self._session,
                 intent,
-                failure.state,
+                IntentState.EXECUTING,
                 actor_id=worker_id,
                 command_id=command_id,
-                reason_code=failure.reason_code,
+                reason_code="revalidation_passed",
+                db_now=db_now,
+            )
+            execution.status = "EXECUTING"
+            execution.started_at = db_now
+            await self._session.flush()
+            precondition_token = hashlib.sha256(
+                json.dumps(
+                    execution.precondition_snapshot,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ).encode("utf-8")
+            ).hexdigest()
+            snapshot_stored = execution.precondition_snapshot or {}
+            return ExecutionPermit(
+                tenant_id=tenant_id,
+                intent_id=intent_id,
+                revision=revision,
+                intent_digest=intent.intent_digest,
+                tool=intent.tool,
+                typed_parameters=intent.canonical_parameters,
+                operation_key=operation_key,
+                precondition_token=precondition_token,
+                resource_version=snapshot_stored.get("resource_version"),
+                execution_id=execution.id,
+                issued_at=db_now,
+            )
+
+    async def _fail_after_fetch_timeout(
+        self,
+        tenant_id: str,
+        intent_id: uuid.UUID,
+        revision: int,
+        worker_id: str,
+        command_id: str,
+    ) -> RevalidationFailure:
+        """Fail closed after a target-fetch timeout, in a fresh transaction."""
+
+        async with self._session.begin():
+            row = (
+                await self._session.execute(
+                    select(ActionIntentORM, func.now())
+                    .where(
+                        ActionIntentORM.tenant_id == tenant_id,
+                        ActionIntentORM.intent_id == intent_id,
+                        ActionIntentORM.revision == revision,
+                    )
+                    .with_for_update(nowait=True)
+                )
+            ).first()
+            if row is None:
+                raise NotFoundError("intent revision not found")
+            intent, db_now = row
+            if IntentState(intent.state) is not IntentState.REVALIDATING:
+                raise StateConflictError(f"claim lost while fetching target: {intent.state}")
+            execution = (
+                await self._session.execute(
+                    select(ExecutionORM).where(
+                        ExecutionORM.intent_id == intent_id,
+                        ExecutionORM.intent_revision == revision,
+                    )
+                )
+            ).scalar_one()
+            await _record_transition(
+                self._session,
+                intent,
+                IntentState.STALE,
+                actor_id=worker_id,
+                command_id=command_id,
+                reason_code="target_fetch_timeout",
                 db_now=db_now,
             )
             execution.status = "FAILED"
-            execution.error_code = failure.reason_code
+            execution.error_code = "target_fetch_timeout"
             execution.finished_at = db_now
             await self._session.flush()
-            return failure
-
-        await _record_transition(
-            self._session,
-            intent,
-            IntentState.EXECUTING,
-            actor_id=worker_id,
-            command_id=command_id,
-            reason_code="revalidation_passed",
-            db_now=db_now,
-        )
-        execution.status = "EXECUTING"
-        execution.started_at = db_now
-        await self._session.flush()
-        precondition_token = hashlib.sha256(
-            json.dumps(
-                execution.precondition_snapshot, sort_keys=True, separators=(",", ":"), default=str
-            ).encode("utf-8")
-        ).hexdigest()
-        snapshot_stored = execution.precondition_snapshot or {}
-        return ExecutionPermit(
-            tenant_id=tenant_id,
-            intent_id=intent_id,
-            revision=revision,
-            intent_digest=intent.intent_digest,
-            tool=intent.tool,
-            typed_parameters=intent.canonical_parameters,
-            operation_key=operation_key,
-            precondition_token=precondition_token,
-            resource_version=snapshot_stored.get("resource_version"),
-            execution_id=execution.id,
-            issued_at=db_now,
-        )
+            return RevalidationFailure(
+                state=IntentState.STALE,
+                reason_code="target_fetch_timeout",
+                execution_id=execution.id,
+            )
 
     async def _revalidate_gates(
         self,
@@ -420,7 +529,7 @@ class RevalidationService:
         execution: ExecutionORM,
         db_now: datetime,
         bundle: PolicyBundle,
-        target_query: LiveTargetQuery,
+        snapshot: TargetSnapshot,
         worker_id: str,
         command_id: str,
     ) -> RevalidationFailure | None:
@@ -500,8 +609,8 @@ class RevalidationService:
             and current_policy.disposition is not PolicyDisposition.ALLOW
         ):
             return fail(IntentState.STALE, "policy_route_stricter")
-        # Gate 4: live target preconditions (bounded, read-only).
-        snapshot = await target_query.fetch(tool, intent.canonical_parameters)
+        # Gate 4: live target preconditions against the snapshot fetched
+        # unlocked in phase 2. No network call runs under a row lock.
         reason = check_preconditions(tool.value, intent.canonical_parameters, snapshot)
         if reason is not None:
             return fail(IntentState.STALE, reason)

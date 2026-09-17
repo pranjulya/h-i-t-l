@@ -68,7 +68,7 @@ def test_non_administrator_cannot_grant_roles(migrated_database, engine) -> None
                 "role": "approver",
                 "reason": "self escalation",
             },
-            headers=bearer(actor="normal-1"),
+            headers={**bearer(actor="normal-1"), "Idempotency-Key": "adm-n1"},
         )
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "FORBIDDEN"
@@ -86,10 +86,51 @@ def test_administrator_grants_role_and_audits(migrated_database, engine) -> None
                 "environments": ["staging"],
                 "reason": "new joiner",
             },
-            headers=bearer(actor="admin-1"),
+            headers={**bearer(actor="admin-1"), "Idempotency-Key": "adm-g1"},
         )
     assert response.status_code == 201
     assert response.json()["role"] == "approver"
+
+
+def test_admin_role_grant_replays_idempotently(migrated_database, engine) -> None:
+    _prepare(engine)
+    _seed_admin(engine)
+    with TestClient(create_app(api_settings())) as client:
+        first = client.post(
+            "/v1/admin/role-assignments",
+            json={
+                "principal_id": "approver-1",
+                "role": "approver",
+                "environments": ["staging"],
+                "reason": "new joiner",
+            },
+            headers={**bearer(actor="admin-1"), "Idempotency-Key": "adm-replay"},
+        )
+        replay = client.post(
+            "/v1/admin/role-assignments",
+            json={
+                "principal_id": "approver-1",
+                "role": "approver",
+                "environments": ["staging"],
+                "reason": "new joiner",
+            },
+            headers={**bearer(actor="admin-1"), "Idempotency-Key": "adm-replay"},
+        )
+        conflict = client.post(
+            "/v1/admin/role-assignments",
+            json={
+                "principal_id": "approver-1",
+                "role": "approver",
+                "environments": ["production"],
+                "reason": "new joiner",
+            },
+            headers={**bearer(actor="admin-1"), "Idempotency-Key": "adm-replay"},
+        )
+    assert first.status_code == 201
+    assert replay.status_code == 201
+    assert replay.json()["assignment_id"] == first.json()["assignment_id"]
+    assert conflict.status_code == 409
+    assert conflict.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
 
 
 def test_policy_bundle_lifecycle_via_routes(migrated_database, engine) -> None:
@@ -99,22 +140,22 @@ def test_policy_bundle_lifecycle_via_routes(migrated_database, engine) -> None:
         registered = client.post(
             "/v1/admin/policy-bundles",
             json={"version": "policy-2", "rules": _POLICY_RULES, "reason": "stricter"},
-            headers=bearer(actor="admin-1"),
+            headers={**bearer(actor="admin-1"), "Idempotency-Key": "adm-p1"},
         )
         activated = client.post(
             "/v1/admin/policy-bundles/policy-2/activate",
             json={"reason": "go live"},
-            headers=bearer(actor="admin-1"),
+            headers={**bearer(actor="admin-1"), "Idempotency-Key": "adm-p2"},
         )
         duplicate = client.post(
             "/v1/admin/policy-bundles",
             json={"version": "policy-2", "rules": _POLICY_RULES, "reason": "dup"},
-            headers=bearer(actor="admin-1"),
+            headers={**bearer(actor="admin-1"), "Idempotency-Key": "adm-p3"},
         )
         missing = client.post(
             "/v1/admin/policy-bundles/policy-x/activate",
             json={"reason": "typo"},
-            headers=bearer(actor="admin-1"),
+            headers={**bearer(actor="admin-1"), "Idempotency-Key": "adm-p4"},
         )
     assert registered.status_code == 201
     assert activated.status_code == 200

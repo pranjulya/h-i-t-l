@@ -1,10 +1,10 @@
 # Project 05 — Human-in-the-Loop AI Ops Workflow
 
-**Status:** PLANNING_COMPLETE — awaiting user review; application implementation has not started.
+**Status:** IMPLEMENTED — phases 00–09 are implemented and `TESTED` locally (278 automated tests with zero unexpected skips; unit, contract, integration on PostgreSQL 16, e2e, security, failure). `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
 
 This repository plans a production-minded AI Ops workflow in which an LLM may propose actions but cannot execute infrastructure operations. Deterministic domain services classify risk, apply policy, collect human approval, revalidate the exact immutable intent, execute through allow-listed adapters, and append an audit trail.
 
-Start with [Implementation.md](Implementation.md), then follow the review order below. No `src/`, migrations, containers, workflow files, or application tests exist yet by design.
+Start with [Implementation.md](Implementation.md), then follow the review order below. The application lives in `src/hitl_ops/` with migrations in `alembic/`; run and test commands are below.
 
 ## Locked V1 scope
 
@@ -18,7 +18,7 @@ Start with [Implementation.md](Implementation.md), then follow the review order 
 
 - `uv sync` — create the virtual environment from the lock file (Python 3.12 managed by uv).
 - `uv run uvicorn hitl_ops.api.app:create_app --factory --reload` — start the API locally.
-- `uv run pytest -q` — unit and integration tests; integration tests use `TEST_DATABASE_URL` (default `postgresql+asyncpg://postgres@localhost:54329/hitl_ops`) and skip when PostgreSQL is unreachable.
+- `uv run pytest -q` — unit and integration tests; integration/security/failure tests require PostgreSQL via `TEST_DATABASE_URL` (default `postgresql+asyncpg://postgres@localhost:54329/hitl_ops`) and fail when it is unreachable.
 - `uv run ruff format . && uv run ruff check . && uv run mypy` — format, lint, and strict typing.
 - `uv run alembic upgrade head` — apply migrations.
 - `docker compose up --build` — full development stack.

@@ -34,18 +34,19 @@ async def test_claim_flow_runs_without_any_cache_layer(failure_database, engine)
             tool="scale_service",
             parameters={"environment": "staging", "service": "api", "replicas": 2},
         )
+
+    class Target:
+        async def fetch(self, tool: object, parameters: dict):
+            from hitl_ops.adapters.base import TargetSnapshot
+
+            return TargetSnapshot(
+                found=True,
+                identity={"service": parameters.get("service")},
+                health="healthy",
+            )
+
+    async with maker() as session:
         service = RevalidationService(session)
-
-        class Target:
-            async def fetch(self, tool: object, parameters: dict):
-                from hitl_ops.adapters.base import TargetSnapshot
-
-                return TargetSnapshot(
-                    found=True,
-                    identity={"service": parameters.get("service")},
-                    health="healthy",
-                )
-
         permit = await service.claim_and_revalidate(
             tenant_id="tenant-1",
             intent_id=pending["intent_id"],
