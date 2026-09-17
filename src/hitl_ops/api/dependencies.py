@@ -43,14 +43,7 @@ def get_actor(
         issuer=settings.identity_issuer,
         audience=settings.identity_audience,
     )
-    if actor.tenant_id != _token_tenant(request, actor):
-        # The server derives tenant from the token; request bodies never set it.
-        pass
     return actor
-
-
-def _token_tenant(request: Request, actor: AuthenticatedActor) -> str:
-    return actor.tenant_id
 
 
 def get_idempotency_key(idempotency_key: Annotated[str | None, Header()] = None) -> str:

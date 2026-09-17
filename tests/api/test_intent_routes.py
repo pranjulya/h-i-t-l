@@ -153,3 +153,27 @@ def test_requests_without_token_are_rejected() -> None:
         response = client.get(f"/v1/intents/{uuid.uuid4()}")
     assert response.status_code == 403
     assert response.json()["error"]["code"] == "FORBIDDEN"
+
+
+def test_request_input_cannot_select_the_tenant() -> None:
+    """Tenant is derived from the verified token; request input is rejected."""
+
+    _prepare()
+    with TestClient(create_app(api_settings())) as client:
+        injected = client.post(
+            "/v1/intents",
+            json={**_SCALE_BODY, "tenant_id": "tenant-2"},
+            headers={**bearer(), "Idempotency-Key": "i-8"},
+        )
+        created = client.post(
+            "/v1/intents", json=_SCALE_BODY, headers={**bearer(), "Idempotency-Key": "i-9"}
+        ).json()
+        as_tenant_1 = client.get(f"/v1/intents/{created['intent_id']}", headers=bearer())
+        as_tenant_2 = client.get(
+            f"/v1/intents/{created['intent_id']}",
+            headers=bearer(actor="user-2", tenant="tenant-2"),
+        )
+    assert injected.status_code == 422
+    assert injected.json()["error"]["code"] == "VALIDATION_FAILED"
+    assert as_tenant_1.status_code == 200
+    assert as_tenant_2.status_code == 404
