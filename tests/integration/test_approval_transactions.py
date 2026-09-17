@@ -388,6 +388,49 @@ async def test_partial_unique_index_blocks_duplicate_approvals(
         await session.rollback()
 
 
+async def test_orphan_approval_decision_is_rejected(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        session.add(
+            ApprovalDecisionORM(
+                tenant_id="tenant-1",
+                intent_id=uuid.uuid4(),
+                intent_revision=1,
+                intent_digest="c" * 64,
+                level=1,
+                decision="APPROVE",
+                actor_id="approver-1",
+                actor_roles_snapshot=["approver"],
+                scope_snapshot={},
+                reason="orphan",
+                policy_version="policy-1",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.flush()
+        await session.rollback()
+
+
+async def test_approval_decision_foreign_key_exists_in_schema(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    from sqlalchemy import inspect
+
+    async with engine.connect() as connection:
+        foreign_keys = await connection.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_foreign_keys("approval_decisions")
+        )
+    assert any(
+        foreign_key["constrained_columns"] == ["tenant_id", "intent_id", "intent_revision"]
+        and foreign_key["referred_table"] == "action_intents"
+        for foreign_key in foreign_keys
+    )
+
+
 async def test_approval_without_required_scope_is_forbidden(
     migrated_database: str, engine: AsyncEngine
 ) -> None:

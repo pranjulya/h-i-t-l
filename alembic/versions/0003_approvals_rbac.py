@@ -41,6 +41,11 @@ def upgrade() -> None:
         ),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint("id", name="pk_approval_decisions"),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "intent_id", "intent_revision"],
+            ["action_intents.tenant_id", "action_intents.intent_id", "action_intents.revision"],
+            name="fk_approval_decisions_intent_revision",
+        ),
     )
     op.create_index(
         "uq_approval_decisions_approving_actor",

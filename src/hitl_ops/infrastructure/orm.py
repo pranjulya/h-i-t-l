@@ -232,6 +232,11 @@ class PolicyBundleORM(Base):
 class ApprovalDecisionORM(Base):
     __tablename__ = "approval_decisions"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "intent_id", "intent_revision"],
+            ["action_intents.tenant_id", "action_intents.intent_id", "action_intents.revision"],
+            name="fk_approval_decisions_intent_revision",
+        ),
         Index(
             "uq_approval_decisions_approving_actor",
             "tenant_id",
