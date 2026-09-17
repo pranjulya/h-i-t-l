@@ -48,6 +48,13 @@ class ForbiddenError(DomainError):
     http_status = 403
 
 
+class RateLimitedError(DomainError):
+    code = "RATE_LIMITED"
+    message = "Request rate exceeded."
+    retryable = True
+    http_status = 429
+
+
 class ApprovalStaleError(DomainError):
     code = "APPROVAL_STALE"
     message = "Decision does not match the current intent revision."

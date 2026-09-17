@@ -56,3 +56,30 @@ def test_valid_production_configuration_is_accepted() -> None:
         identity_shared_secret="a" * 32,
     )
     assert resolved.is_production is True
+
+
+@pytest.mark.parametrize("value", [0, -1, -65536])
+def test_request_size_limit_must_be_positive(value: int) -> None:
+    # A zero or negative cap would reject every request; fail at startup instead.
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, max_request_bytes=value)
+
+
+@pytest.mark.parametrize("value", [0, -1, -120])
+def test_rate_limit_must_be_positive(value: int) -> None:
+    # A zero or negative limit would make the service permanently unusable.
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, rate_limit_per_minute=value)
+
+
+def test_limits_reject_values_beyond_the_supported_range() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, max_request_bytes=64 * 1024 * 1024 * 1024)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, rate_limit_per_minute=10_000_000_000)
+
+
+def test_default_limits_start_up_cleanly() -> None:
+    resolved = Settings(_env_file=None)
+    assert resolved.max_request_bytes > 0
+    assert resolved.rate_limit_per_minute > 0

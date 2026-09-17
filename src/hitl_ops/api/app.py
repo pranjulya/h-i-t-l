@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 
 from hitl_ops.agent.orchestrator import AgentOrchestrator, DisabledLLMProvider
 from hitl_ops.api import admin, approvals, intents
+from hitl_ops.api.body_limit import BodySizeLimitMiddleware
 from hitl_ops.api.errors import register_error_handlers
 from hitl_ops.api.rate_limit import SlidingWindowRateLimiter
 from hitl_ops.config import Settings
@@ -28,21 +29,6 @@ from hitl_ops.infrastructure.database import (
 from hitl_ops.observability.logging import configure_logging
 
 _READINESS_TIMEOUT_SECONDS = 2.0
-
-
-def _payload_too_large(correlation_id: str) -> JSONResponse:
-    return JSONResponse(
-        status_code=413,
-        content={
-            "error": {
-                "code": "PAYLOAD_TOO_LARGE",
-                "message": "request body exceeds the configured limit",
-                "retryable": False,
-                "correlation_id": correlation_id,
-                "details": {},
-            }
-        },
-    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -61,6 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     rate_limiter = SlidingWindowRateLimiter(resolved.rate_limit_per_minute)
     app = FastAPI(title="HITL AI Ops", version="0.1.0", lifespan=lifespan)
     app.state.settings = resolved
+    app.state.rate_limiter = rate_limiter
     app.state.orchestrator = AgentOrchestrator(DisabledLLMProvider())
     register_error_handlers(app)
 
@@ -75,28 +62,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         correlation_id = request.headers.get("X-Correlation-ID") or uuid.uuid4().hex
         request.state.correlation_id = correlation_id
 
-        content_length = request.headers.get("content-length")
-        if (
-            content_length
-            and content_length.isdigit()
-            and int(content_length) > resolved.max_request_bytes
+        # Only unauthenticated traffic is keyed by client address. Authenticated
+        # requests are limited per principal in get_actor, so users sharing a
+        # proxy or NAT address do not throttle one another.
+        if request.headers.get("authorization") is None and not rate_limiter.allow(
+            f"anonymous:{request.client.host if request.client else 'unknown'}"
         ):
-            return _payload_too_large(correlation_id)
-        # Chunked bodies and requests without Content-Length cannot be trusted
-        # on headers: stream with a hard cap and stop reading once the limit
-        # is exceeded, so an oversized body cannot exhaust memory.
-        if content_length is None or not content_length.isdigit():
-            received = 0
-            async for chunk in request.stream():
-                received += len(chunk)
-                if received > resolved.max_request_bytes:
-                    return _payload_too_large(correlation_id)
-        else:
-            body = await request.body()
-            if len(body) > resolved.max_request_bytes:
-                return _payload_too_large(correlation_id)
-
-        if not rate_limiter.allow(request.client.host if request.client else "anonymous"):
             return JSONResponse(
                 status_code=429,
                 content={
@@ -115,6 +86,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Cache-Control"] = "no-store"
         return response
+
+    # Registered last so it is outermost: the body must be buffered and
+    # replayed before any inner middleware or route reads the request.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=resolved.max_request_bytes)
 
     @app.get("/health/live")
     async def liveness() -> dict[str, str]:

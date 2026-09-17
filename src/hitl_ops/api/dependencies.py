@@ -9,7 +9,7 @@ from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from hitl_ops.config import Settings
-from hitl_ops.domain.errors import ForbiddenError
+from hitl_ops.domain.errors import ForbiddenError, RateLimitedError
 from hitl_ops.infrastructure.identity import AuthenticatedActor, validate_token
 
 
@@ -46,6 +46,8 @@ def get_actor(
         )
     except Exception as exc:
         raise ForbiddenError("authenticated context required") from exc
+    if not request.app.state.rate_limiter.allow(f"actor:{actor.tenant_id}:{actor.actor_id}"):
+        raise RateLimitedError("request rate exceeded; retry later")
     return actor
 
 

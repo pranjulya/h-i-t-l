@@ -85,6 +85,39 @@ def test_chunked_and_headerless_oversized_bodies_are_rejected(hardened_database)
         assert headerless_response.status_code == 413
 
 
+def test_valid_chunked_body_reaches_the_route_intact(hardened_database) -> None:
+    """A body read for size enforcement must still be readable by the route.
+
+    Chunked requests carry no trustworthy Content-Length, so the limit check
+    consumes the stream. Without replaying the buffered bytes the route sees
+    an exhausted body and rejects an otherwise valid request.
+    """
+
+    settings = api_settings()
+    payload = (
+        b'{"tool": "scale_service", "parameters": '
+        b'{"environment": "staging", "service": "api", "replicas": 4}, '
+        b'"rationale": "chunked but valid"}'
+    )
+
+    def chunks() -> object:
+        for offset in range(0, len(payload), 16):
+            yield payload[offset : offset + 16]
+
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/v1/intents",
+            content=chunks(),  # type: ignore[arg-type]
+            headers={
+                **bearer(),
+                "Idempotency-Key": "chunked-valid",
+                "Content-Type": "application/json",
+            },
+        )
+    assert response.status_code == 201, response.text
+    assert response.json()["state"] == "AUTO_APPROVED"
+
+
 def test_prompt_injection_cannot_invent_tools_or_fields(hardened_database) -> None:
     import asyncio
 
