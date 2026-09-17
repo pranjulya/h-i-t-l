@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -25,6 +25,19 @@ from hitl_ops.infrastructure.orm import (
     OutboxMessageORM,
     StateTransitionORM,
 )
+
+MAX_RECONCILE_ATTEMPTS = 5
+RECONCILE_BACKOFF_BASE_SECONDS = 5
+RECONCILE_BACKOFF_CEILING_SECONDS = 300
+
+
+def reconcile_backoff_seconds(attempts: int) -> int:
+    """Exponential backoff between automatic reconciliation attempts."""
+
+    if attempts < 1:
+        return RECONCILE_BACKOFF_BASE_SECONDS
+    backoff: int = RECONCILE_BACKOFF_BASE_SECONDS * 2 ** (attempts - 1)
+    return min(backoff, RECONCILE_BACKOFF_CEILING_SECONDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,15 +90,42 @@ class ReconciliationService:
             )
 
         db_now = datetime.now(UTC)
-        escalated = False
         if provider_error is not None or evidence.outcome == ExecutionOutcome.UNKNOWN.value:
             # Evidence is insufficient: UNKNOWN is preserved, never guessed.
-            escalated = True
-            _ = escalated
+            # Automatic reconciliation is scheduled with backoff and stops
+            # entirely once the attempt budget is spent, handing the outcome
+            # to an operator instead of polling an unhealthy provider forever.
+            attempts = (execution.reconcile_attempts or 0) + 1
+            execution.reconcile_attempts = attempts
             execution.status = "UNKNOWN"
-            execution.result_summary = sanitize_raw_proposal(
-                {"escalated": True, "evidence": evidence.summary}
+            exhausted = attempts >= MAX_RECONCILE_ATTEMPTS
+            execution.next_reconcile_at = (
+                None
+                if exhausted
+                else db_now + timedelta(seconds=reconcile_backoff_seconds(attempts))
             )
+            execution.result_summary = sanitize_raw_proposal(
+                {
+                    "escalated": True,
+                    "evidence": evidence.summary,
+                    "reconcile_attempts": attempts,
+                    "reconcile_exhausted": exhausted,
+                }
+            )
+            if exhausted:
+                execution.error_code = "reconcile_attempts_exhausted"
+                self._session.add(
+                    OutboxMessageORM(
+                        topic="execution.reconciliation_exhausted",
+                        payload={
+                            "tenant_id": execution.tenant_id,
+                            "intent_id": str(execution.intent_id),
+                            "revision": execution.intent_revision,
+                            "attempts": attempts,
+                            "command_id": command_id,
+                        },
+                    )
+                )
             await self._session.flush()
             return ReconciliationResult(
                 execution_id=execution.id,
@@ -113,6 +153,8 @@ class ReconciliationService:
         )
         execution.finished_at = db_now
         execution.result_summary = sanitize_raw_proposal(evidence.summary)
+        execution.next_reconcile_at = None
+        execution.error_code = None
         await self._session.flush()
         return ReconciliationResult(
             execution_id=execution.id,

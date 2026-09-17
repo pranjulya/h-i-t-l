@@ -14,11 +14,14 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 
 from hitl_ops.adapters.base import DenyingTargetQuery, InfrastructureAdapter
 from hitl_ops.application.execution import ExecutionService
-from hitl_ops.application.reconciliation import ReconciliationService
+from hitl_ops.application.reconciliation import (
+    MAX_RECONCILE_ATTEMPTS,
+    ReconciliationService,
+)
 from hitl_ops.application.revalidation import ExecutionPermit, RevalidationService
 from hitl_ops.domain.enums import IntentState
 from hitl_ops.domain.errors import DomainError, StateConflictError
@@ -26,27 +29,41 @@ from hitl_ops.infrastructure.orm import ActionIntentORM, ExecutionORM
 from hitl_ops.infrastructure.repositories import PolicyBundleRepository
 
 _EXECUTABLE_STATES = (IntentState.AUTO_APPROVED.value, IntentState.APPROVED.value)
-_UNKNOWN_STATES = (IntentState.EXECUTION_UNKNOWN.value,)
 _TICK_LIMIT = 5
 
 
 async def run_worker_tick(session_factory: Any, adapter: InfrastructureAdapter) -> dict[str, int]:
-    """One bounded worker pass: execute eligible intents, reconcile unknowns."""
+    """One bounded worker pass: execute eligible intents, reconcile unknowns.
+
+    Reconciliation has exactly one scheduler: this pass. The recovery path may
+    move an execution to UNKNOWN and schedule it, but never reconciles on its
+    own, so an unresolved provider sees at most one status call per due window.
+    """
 
     stats = {"executed": 0, "reconciled": 0, "skipped": 0}
 
-    # Snapshot unknowns before executing: reconciliation is a separate pass and
-    # must not immediately resolve what this same tick just marked unknown.
+    # Snapshot due unknowns before executing: reconciliation is a separate pass
+    # and must not immediately resolve what this same tick just marked unknown.
     async with session_factory() as session:
         pending_unknowns = (
-            await session.execute(
-                select(
-                    ActionIntentORM.tenant_id, ActionIntentORM.intent_id, ActionIntentORM.revision
+            (
+                await session.execute(
+                    select(ExecutionORM.id)
+                    .where(
+                        ExecutionORM.status == "UNKNOWN",
+                        ExecutionORM.reconcile_attempts < MAX_RECONCILE_ATTEMPTS,
+                        or_(
+                            ExecutionORM.next_reconcile_at.is_(None),
+                            ExecutionORM.next_reconcile_at <= func.now(),
+                        ),
+                    )
+                    .order_by(ExecutionORM.next_reconcile_at.asc().nulls_first())
+                    .limit(_TICK_LIMIT)
                 )
-                .where(ActionIntentORM.state.in_(_UNKNOWN_STATES))
-                .limit(_TICK_LIMIT)
             )
-        ).all()
+            .scalars()
+            .all()
+        )
 
     async with session_factory() as session:
         eligible = (
@@ -71,20 +88,9 @@ async def run_worker_tick(session_factory: Any, adapter: InfrastructureAdapter) 
         else:
             stats["skipped"] += 1
 
-    for tenant_id, intent_id, revision in pending_unknowns:
+    for execution_id in pending_unknowns:
         command_id = uuid.uuid4().hex
         async with session_factory() as session, session.begin():
-            execution_id = (
-                await session.execute(
-                    select(ExecutionORM.id).where(
-                        ExecutionORM.tenant_id == tenant_id,
-                        ExecutionORM.intent_id == intent_id,
-                        ExecutionORM.intent_revision == revision,
-                    )
-                )
-            ).scalar_one_or_none()
-            if execution_id is None:
-                continue
             reconciliation = ReconciliationService(session, adapter)
             try:
                 await reconciliation.reconcile(

@@ -3,17 +3,21 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from hitl_ops.adapters.demo import DemoInfrastructureAdapter
-from hitl_ops.application.reconciliation import ReconciliationService
+from hitl_ops.application.reconciliation import (
+    MAX_RECONCILE_ATTEMPTS,
+    ReconciliationService,
+)
 from hitl_ops.domain.enums import ExecutionOutcome, IntentState
 from hitl_ops.domain.errors import StateConflictError
 from hitl_ops.infrastructure.database import build_sessionmaker
-from hitl_ops.infrastructure.orm import ActionIntentORM, ExecutionORM
+from hitl_ops.infrastructure.orm import ActionIntentORM, ExecutionORM, OutboxMessageORM
 from hitl_ops.worker import run_worker_tick
 from tests.integration.conftest import create_approved_intent
 
@@ -130,3 +134,96 @@ async def test_reconciled_intent_leaves_terminal_state_consistent(
         intent = await session.get(ActionIntentORM, ("tenant-1", execution.intent_id, 1))
         assert intent is not None
         assert intent.state == IntentState.SUCCEEDED.value
+
+
+async def test_missing_evidence_schedules_a_backoff_instead_of_retrying_immediately(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    execution_id, adapter = await _unknown_execution(engine)
+    adapter._operations.clear()
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        await ReconciliationService(session, adapter).reconcile(
+            execution_id=execution_id, worker_id="worker-r", command_id=uuid.uuid4().hex
+        )
+
+    async with maker() as session, session.begin():
+        execution = await session.get(ExecutionORM, execution_id)
+        assert execution is not None
+        assert execution.reconcile_attempts == 1
+        assert execution.next_reconcile_at is not None
+        assert execution.next_reconcile_at > datetime.now(UTC)
+
+
+async def test_worker_tick_skips_an_unknown_until_its_backoff_elapses(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    execution_id, adapter = await _unknown_execution(engine)
+    adapter._operations.clear()
+    maker = build_sessionmaker(engine)
+
+    calls: list[str] = []
+
+    class CountingAdapter(DemoInfrastructureAdapter):
+        async def lookup_status(self, tool, operation_key, provider_operation_id):
+            calls.append(operation_key)
+            return await super().lookup_status(tool, operation_key, provider_operation_id)
+
+    counting = CountingAdapter()
+    counting._operations.clear()
+
+    # Reconcile once so the attempt is scheduled into the future.
+    async with maker() as session, session.begin():
+        await ReconciliationService(session, adapter).reconcile(
+            execution_id=execution_id, worker_id="worker-r", command_id=uuid.uuid4().hex
+        )
+    # Not due yet: the tick must not call the provider again.
+    await run_worker_tick(maker, counting)
+    assert calls == []
+
+    # Once due, exactly one provider status call is made.
+    async with maker() as session, session.begin():
+        execution = await session.get(ExecutionORM, execution_id)
+        assert execution is not None
+        execution.next_reconcile_at = datetime.now(UTC) - timedelta(seconds=1)
+    await run_worker_tick(maker, counting)
+    assert len(calls) == 1
+
+
+async def test_reconciliation_attempts_are_bounded_then_escalate_to_operators(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    execution_id, adapter = await _unknown_execution(engine)
+    adapter._operations.clear()
+    maker = build_sessionmaker(engine)
+
+    async with maker() as session, session.begin():
+        execution = await session.get(ExecutionORM, execution_id)
+        assert execution is not None
+        execution.reconcile_attempts = MAX_RECONCILE_ATTEMPTS - 1
+        execution.next_reconcile_at = datetime.now(UTC) - timedelta(seconds=1)
+
+    await run_worker_tick(maker, adapter)
+
+    async with maker() as session, session.begin():
+        execution = await session.get(ExecutionORM, execution_id)
+        assert execution is not None
+        assert execution.reconcile_attempts == MAX_RECONCILE_ATTEMPTS
+        assert execution.next_reconcile_at is None
+        assert execution.error_code == "reconcile_attempts_exhausted"
+        topics = (
+            (
+                await session.execute(
+                    select(OutboxMessageORM.topic).where(
+                        OutboxMessageORM.payload["intent_id"].astext == str(execution.intent_id)
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert "execution.reconciliation_exhausted" in topics
+
+    # Exhausted executions are never selected again.
+    second = await run_worker_tick(maker, adapter)
+    assert second["reconciled"] == 0
