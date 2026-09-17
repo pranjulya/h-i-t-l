@@ -14,6 +14,15 @@ Start with [Implementation.md](Implementation.md), then follow the review order 
 - Plain Python owns workflow rules. LangGraph may later coordinate calls but may never own policy or state-transition truth.
 - The LLM never receives infrastructure credentials and never invokes an infrastructure SDK.
 
+## Run and test
+
+- `uv sync` — create the virtual environment from the lock file (Python 3.12 managed by uv).
+- `uv run uvicorn hitl_ops.api.app:create_app --factory --reload` — start the API locally.
+- `uv run pytest -q` — unit and integration tests; integration tests use `TEST_DATABASE_URL` (default `postgresql+asyncpg://postgres@localhost:54329/hitl_ops`) and skip when PostgreSQL is unreachable.
+- `uv run ruff format . && uv run ruff check . && uv run mypy` — format, lint, and strict typing.
+- `uv run alembic upgrade head` — apply migrations.
+- `docker compose up --build` — full development stack.
+
 ## Review order
 
 1. `docs/product/PRD.md`

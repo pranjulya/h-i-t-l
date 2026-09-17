@@ -1,0 +1,26 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: hitl
+      POSTGRES_PASSWORD: hitl
+      POSTGRES_DB: hitl_ops
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hitl -d hitl_ops"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build: .
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: INFO
+      DATABASE_URL: postgresql+asyncpg://hitl:hitl@db:5432/hitl_ops
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy

@@ -1,6 +1,6 @@
 # Phase 00 — Repository and Application Foundation
 
-**Status:** NOT_STARTED — specification only; awaiting explicit user approval. No Phase 00 application files have been created.
+**Status:** TESTED — implemented with passing unit/integration tests, Ruff, and strict mypy; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
 
 ## Goal
 
