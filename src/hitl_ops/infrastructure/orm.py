@@ -138,6 +138,11 @@ class OutboxMessageORM(Base):
 class RiskEvaluationORM(Base):
     __tablename__ = "risk_evaluations"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "intent_id", "intent_revision"],
+            ["action_intents.tenant_id", "action_intents.intent_id", "action_intents.revision"],
+            name="fk_risk_evaluations_intent_revision",
+        ),
         UniqueConstraint(
             "tenant_id",
             "intent_id",
@@ -164,6 +169,11 @@ class RiskEvaluationORM(Base):
 class PolicyEvaluationORM(Base):
     __tablename__ = "policy_evaluations"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "intent_id", "intent_revision"],
+            ["action_intents.tenant_id", "action_intents.intent_id", "action_intents.revision"],
+            name="fk_policy_evaluations_intent_revision",
+        ),
         UniqueConstraint(
             "tenant_id",
             "intent_id",

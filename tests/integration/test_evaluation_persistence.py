@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, inspect, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from hitl_ops.domain.enums import IntentSource, PolicyDisposition, RiskBand, ToolName
@@ -238,3 +239,69 @@ async def test_record_rejects_unknown_intent(
                 command_id=uuid.uuid4().hex,
                 correlation_id="c",
             )
+
+
+async def test_orphan_risk_evaluation_is_rejected(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        session.add(
+            RiskEvaluationORM(
+                tenant_id="tenant-1",
+                intent_id=uuid.uuid4(),
+                intent_revision=1,
+                generation=1,
+                band="MEDIUM",
+                factors=[],
+                rule_version="risk-rules-1",
+                evaluated_context={},
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.flush()
+        await session.rollback()
+
+
+async def test_orphan_policy_evaluation_is_rejected(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        session.add(
+            PolicyEvaluationORM(
+                tenant_id="tenant-1",
+                intent_id=uuid.uuid4(),
+                intent_revision=1,
+                generation=1,
+                disposition="ALLOW",
+                route="AUTO_APPROVE",
+                required_roles=[],
+                required_scopes=[],
+                obligations=[],
+                reason_codes=[],
+                policy_version="policy-1",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.flush()
+        await session.rollback()
+
+
+async def test_evaluation_tables_are_foreign_keyed_to_the_intent_revision(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    expected = ["tenant_id", "intent_id", "intent_revision"]
+    async with engine.connect() as connection:
+        for table in ("risk_evaluations", "policy_evaluations"):
+            foreign_keys = await connection.run_sync(
+                lambda sync_connection, table=table: inspect(sync_connection).get_foreign_keys(
+                    table
+                )
+            )
+            assert any(
+                foreign_key["constrained_columns"] == expected
+                and foreign_key["referred_table"] == "action_intents"
+                and foreign_key["referred_columns"] == ["tenant_id", "intent_id", "revision"]
+                for foreign_key in foreign_keys
+            ), f"{table} is missing its intent-revision foreign key"

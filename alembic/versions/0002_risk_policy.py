@@ -40,6 +40,11 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name="pk_risk_evaluations"),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "intent_id", "intent_revision"],
+            ["action_intents.tenant_id", "action_intents.intent_id", "action_intents.revision"],
+            name="fk_risk_evaluations_intent_revision",
+        ),
         sa.UniqueConstraint(
             "tenant_id",
             "intent_id",
@@ -71,6 +76,11 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.PrimaryKeyConstraint("id", name="pk_policy_evaluations"),
+        sa.ForeignKeyConstraint(
+            ["tenant_id", "intent_id", "intent_revision"],
+            ["action_intents.tenant_id", "action_intents.intent_id", "action_intents.revision"],
+            name="fk_policy_evaluations_intent_revision",
+        ),
         sa.UniqueConstraint(
             "tenant_id",
             "intent_id",
