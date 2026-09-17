@@ -25,7 +25,6 @@ from hitl_ops.application.reconciliation import (
 from hitl_ops.application.revalidation import ExecutionPermit, RevalidationService
 from hitl_ops.domain.enums import IntentState
 from hitl_ops.domain.errors import DomainError, StateConflictError
-from hitl_ops.infrastructure.audit import AuditWriter
 from hitl_ops.infrastructure.notification import LoggingNotificationSink
 from hitl_ops.infrastructure.orm import ActionIntentORM, ExecutionORM
 from hitl_ops.infrastructure.outbox import OutboxPublisher
@@ -107,15 +106,13 @@ async def run_worker_tick(
             except DomainError:
                 stats["skipped"] += 1
 
-    async with session_factory() as session, session.begin():
-        publisher = OutboxPublisher(
-            session,
-            AuditWriter(session),
-            notification_sink or LoggingNotificationSink(),
-        )
-        publication = await publisher.publish_pending()
-        stats["audited"] = publication["audited"]
-        stats["notified"] = publication["notified"]
+    publisher = OutboxPublisher(
+        session_factory,
+        notification_sink or LoggingNotificationSink(),
+    )
+    publication = await publisher.publish_pending()
+    stats["audited"] = publication["audited"]
+    stats["notified"] = publication["notified"]
     return stats
 
 

@@ -7,7 +7,7 @@ from itertools import pairwise
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from hitl_ops.infrastructure.audit import AuditWriter, verify_aggregate_chain
+from hitl_ops.infrastructure.audit import verify_aggregate_chain
 from hitl_ops.infrastructure.database import build_sessionmaker
 from hitl_ops.infrastructure.notification import RecordingNotificationSink
 from hitl_ops.infrastructure.orm import AuditEventORM, StateTransitionORM
@@ -21,8 +21,9 @@ async def _approved_intent(engine: AsyncEngine) -> dict:
     maker = build_sessionmaker(engine)
     async with maker() as session, session.begin():
         pending = await create_approved_intent(session, tool="restart_service", parameters=_RESTART)
-        publisher = OutboxPublisher(session, AuditWriter(session), RecordingNotificationSink())
-        await publisher.publish_pending()
+    # Publication claims and delivers in its own transactions, so it must run
+    # after the intent transaction has committed.
+    await OutboxPublisher(maker, RecordingNotificationSink()).publish_pending()
     return pending
 
 

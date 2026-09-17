@@ -13,7 +13,7 @@ from hitl_ops.domain.enums import IntentSource, ToolName
 from hitl_ops.domain.models import CreateIntentCommand
 from hitl_ops.domain.policy import SEED_POLICY_BUNDLE_RULES, PolicyBundle, evaluate_policy
 from hitl_ops.domain.risk import RiskContext, evaluate_risk
-from hitl_ops.infrastructure.audit import AuditWriter, verify_aggregate_chain
+from hitl_ops.infrastructure.audit import verify_aggregate_chain
 from hitl_ops.infrastructure.database import build_sessionmaker
 from hitl_ops.infrastructure.notification import RecordingNotificationSink
 from hitl_ops.infrastructure.orm import AuditEventORM, OutboxMessageORM
@@ -86,8 +86,8 @@ async def test_committed_transition_always_has_outbox_and_audits(
             )
         ).scalar_one()
         assert outbox_count >= 3
-        publisher = OutboxPublisher(session, AuditWriter(session), sink)
-        await publisher.publish_pending()
+
+    await OutboxPublisher(maker, sink).publish_pending()
 
     async with maker() as session, session.begin():
         pending = (
@@ -126,13 +126,9 @@ async def test_duplicate_delivery_is_idempotent(
         command = _command()
         await IntentRepository(session).create(command)
 
-    async with maker() as session, session.begin():
-        publisher = OutboxPublisher(session, AuditWriter(session), sink)
-        await publisher.publish_pending()
+    await OutboxPublisher(maker, sink).publish_pending()
     # Publisher crash-after-send replay: same rows published again.
-    async with maker() as session, session.begin():
-        publisher = OutboxPublisher(session, AuditWriter(session), sink)
-        await publisher.publish_pending()
+    await OutboxPublisher(maker, sink).publish_pending()
 
     async with maker() as session, session.begin():
         audit_count = (
@@ -155,8 +151,8 @@ async def test_hash_chain_detects_tampering(migrated_database: str, engine: Asyn
     async with maker() as session, session.begin():
         command = _command()
         await IntentRepository(session).create(command)
-        publisher = OutboxPublisher(session, AuditWriter(session), sink)
-        await publisher.publish_pending()
+
+    await OutboxPublisher(maker, sink).publish_pending()
 
     # Attempted tampering must be blocked by the immutability trigger.
     async with maker() as session, session.begin():
@@ -203,9 +199,7 @@ async def test_backoff_schedules_and_skips_unready_retries(
             )
         )
 
-    async with maker() as session, session.begin():
-        publisher = OutboxPublisher(session, AuditWriter(session), sink)
-        stats = await publisher.publish_pending()
+    stats = await OutboxPublisher(maker, sink).publish_pending()
 
     async with maker() as session, session.begin():
         unready = (

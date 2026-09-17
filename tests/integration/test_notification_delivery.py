@@ -5,7 +5,6 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from hitl_ops.infrastructure.audit import AuditWriter
 from hitl_ops.infrastructure.database import build_sessionmaker
 from hitl_ops.infrastructure.notification import FailingNotificationSink, RecordingNotificationSink
 from hitl_ops.infrastructure.orm import OutboxMessageORM
@@ -29,9 +28,7 @@ async def test_approval_request_notification_is_delivered(
     sink = RecordingNotificationSink()
     pending = await _pending_with_outbox(engine)
 
-    async with maker() as session, session.begin():
-        publisher = OutboxPublisher(session, AuditWriter(session), sink)
-        await publisher.publish_pending()
+    await OutboxPublisher(maker, sink).publish_pending()
 
     approval_notifications = [m for m in sink.deliveries if "PENDING_APPROVAL" in m.body]
     assert len(approval_notifications) == 1
@@ -44,9 +41,7 @@ async def test_notification_outage_retries_without_corrupting_state(
     maker = build_sessionmaker(engine)
     pending = await _pending_with_outbox(engine)
 
-    async with maker() as session, session.begin():
-        publisher = OutboxPublisher(session, AuditWriter(session), FailingNotificationSink())
-        await publisher.publish_pending()
+    await OutboxPublisher(maker, FailingNotificationSink()).publish_pending()
 
     # All approval-request outbox rows remain unpublished with attempt metadata.
     async with maker() as session, session.begin():
@@ -83,8 +78,7 @@ async def test_duplicate_notification_delivery_is_idempotent(
     sink = RecordingNotificationSink()
     pending = await _pending_with_outbox(engine)
 
-    async with maker() as session, session.begin():
-        await OutboxPublisher(session, AuditWriter(session), sink).publish_pending()
+    await OutboxPublisher(maker, sink).publish_pending()
     # Simulated redelivery of the same events.
     async with maker() as session, session.begin():
         rows = (
@@ -98,7 +92,7 @@ async def test_duplicate_notification_delivery_is_idempotent(
         )
         for row in rows:
             row.published_at = None
-        await OutboxPublisher(session, AuditWriter(session), sink).publish_pending()
+    await OutboxPublisher(maker, sink).publish_pending()
 
     # Redelivery produces duplicate messages whose deterministic ids match:
     # the idempotent consumer recognizes them as one logical notification.
@@ -106,3 +100,42 @@ async def test_duplicate_notification_delivery_is_idempotent(
     assert len(approval_notifications) == 2
     assert len({m.notification_id for m in approval_notifications}) == 1
     _ = pending
+
+
+async def test_external_delivery_runs_with_no_outbox_row_lock_held(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    """A network sink must never run while the publisher holds row locks.
+
+    The sink probes the very outbox row being delivered with SELECT ... FOR
+    UPDATE NOWAIT from a separate connection. It only succeeds if the
+    publisher released the claim lock before calling out.
+    """
+
+    from sqlalchemy.exc import DBAPIError
+
+    maker = build_sessionmaker(engine)
+    pending = await _pending_with_outbox(engine)
+
+    observed: list[str] = []
+
+    class LockProbingSink(RecordingNotificationSink):
+        async def approval_requested(self, **kwargs):  # type: ignore[no-untyped-def]
+            async with maker() as session, session.begin():
+                try:
+                    await session.execute(
+                        select(OutboxMessageORM.id)
+                        .where(
+                            OutboxMessageORM.payload["intent_id"].astext
+                            == str(pending["intent_id"])
+                        )
+                        .with_for_update(nowait=True)
+                    )
+                    observed.append("lock acquired")
+                except DBAPIError:
+                    observed.append("lock blocked")
+            return await super().approval_requested(**kwargs)
+
+    await OutboxPublisher(maker, LockProbingSink()).publish_pending()
+
+    assert observed == ["lock acquired"]

@@ -28,6 +28,10 @@ def upgrade() -> None:
     op.add_column(
         "outbox_messages", sa.Column("published_at", sa.DateTime(timezone=True), nullable=True)
     )
+    op.add_column("outbox_messages", sa.Column("claimed_by", sa.String(length=64), nullable=True))
+    op.add_column(
+        "outbox_messages", sa.Column("claim_expires_at", sa.DateTime(timezone=True), nullable=True)
+    )
     op.create_index("ix_outbox_messages_pending", "outbox_messages", ["published_at", "created_at"])
 
     op.create_table(
@@ -93,6 +97,8 @@ def downgrade() -> None:
     op.drop_index("ix_audit_events_aggregate", table_name="audit_events")
     op.drop_table("audit_events")
     op.drop_index("ix_outbox_messages_pending", table_name="outbox_messages")
+    op.drop_column("outbox_messages", "claim_expires_at")
+    op.drop_column("outbox_messages", "claimed_by")
     op.drop_column("outbox_messages", "published_at")
     op.drop_column("outbox_messages", "next_attempt_at")
     op.drop_column("outbox_messages", "attempts")
