@@ -171,7 +171,74 @@ async def test_hash_chain_detects_tampering(migrated_database: str, engine: Asyn
     assert valid is True
 
 
-async def test_empty_audit_chain_is_not_valid(migrated_database: str, engine: AsyncEngine) -> None:
+async def test_reconciliation_exhaustion_reaches_the_audit_trail(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    """Operator escalation must actually be delivered, not just queued."""
+
+    maker = build_sessionmaker(engine)
+    intent_id = uuid.uuid4()
+    async with maker() as session, session.begin():
+        session.add(
+            OutboxMessageORM(
+                topic="execution.reconciliation_exhausted",
+                payload={
+                    "tenant_id": "tenant-1",
+                    "intent_id": str(intent_id),
+                    "revision": 1,
+                    "attempts": 5,
+                    "command_id": "cmd-1",
+                },
+            )
+        )
+
+    await OutboxPublisher(maker, RecordingNotificationSink()).publish_pending()
+
+    async with maker() as session, session.begin():
+        events = (
+            (
+                await session.execute(
+                    select(AuditEventORM).where(AuditEventORM.aggregate_id == intent_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert [event.event_type for event in events] == ["execution_reconciliation_exhausted"]
+
+
+async def test_a_publisher_that_lost_its_lease_does_not_finalize(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    """A slow publisher must not clear a lease that another publisher now owns."""
+
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        session.add(
+            OutboxMessageORM(
+                topic="intent.created",
+                payload={"tenant_id": "tenant-1", "intent_id": str(uuid.uuid4())},
+            )
+        )
+
+    publisher = OutboxPublisher(maker, RecordingNotificationSink())
+    claimed = await publisher._claim("worker-a")
+    assert len(claimed) == 1
+    message_id = claimed[0]
+
+    async with maker() as session, session.begin():
+        row = await session.get(OutboxMessageORM, message_id)
+        assert row is not None
+        row.claimed_by = "worker-b"
+
+    await publisher._finalize(message_id, worker_id="worker-a")
+
+    async with maker() as session, session.begin():
+        row = await session.get(OutboxMessageORM, message_id)
+        assert row is not None
+        assert row.published_at is None
+        assert row.claimed_by == "worker-b"
+
     maker = build_sessionmaker(engine)
     async with maker() as session, session.begin():
         valid, problem = await verify_aggregate_chain(session, "tenant-1", uuid.uuid4())

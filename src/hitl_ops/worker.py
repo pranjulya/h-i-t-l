@@ -138,6 +138,9 @@ async def run_worker_tick(
     publication = await publisher.publish_pending()
     stats["audited"] = publication["audited"]
     stats["notified"] = publication["notified"]
+    # Surfaces a persistently failing audit/notification sink, which is
+    # otherwise only visible inside the publisher.
+    stats["delivery_failed"] = publication["failed"]
     return stats
 
 

@@ -37,6 +37,7 @@ _AUDIT_TOPICS = {
     "execution.executing",
     "execution.execution_unknown",
     "execution.reconciled",
+    "execution.reconciliation_exhausted",
     "administration.role_changed",
     "administration.policy_changed",
 }
@@ -70,10 +71,10 @@ class OutboxPublisher:
             try:
                 delivered = await self._deliver(message_id, worker_id=worker_id)
             except Exception:
-                await self._reschedule(message_id)
+                await self._reschedule(message_id, worker_id=worker_id)
                 stats["failed"] += 1
                 continue
-            await self._finalize(message_id)
+            await self._finalize(message_id, worker_id=worker_id)
             stats["audited"] += delivered["audited"]
             stats["notified"] += delivered["notified"]
         return stats
@@ -160,19 +161,26 @@ class OutboxPublisher:
                 )
         return delivered
 
-    async def _finalize(self, message_id: uuid.UUID) -> None:
+    async def _finalize(self, message_id: uuid.UUID, *, worker_id: str) -> None:
         async with self._session_factory() as session, session.begin():
             row = await session.get(OutboxMessageORM, message_id)
             if row is None or row.published_at is not None:
+                return
+            if row.claimed_by != worker_id:
+                # Another publisher re-claimed after our lease expired; it owns
+                # the row now and will finalize it. Clearing the lease here
+                # would let a third publisher deliver the same message again.
                 return
             row.published_at = datetime.now(UTC)
             row.claimed_by = None
             row.claim_expires_at = None
 
-    async def _reschedule(self, message_id: uuid.UUID) -> None:
+    async def _reschedule(self, message_id: uuid.UUID, *, worker_id: str) -> None:
         async with self._session_factory() as session, session.begin():
             row = await session.get(OutboxMessageORM, message_id)
             if row is None or row.published_at is not None:
+                return
+            if row.claimed_by != worker_id:
                 return
             row.next_attempt_at = datetime.now(UTC) + timedelta(seconds=self._retry_backoff_seconds)
             row.claimed_by = None
