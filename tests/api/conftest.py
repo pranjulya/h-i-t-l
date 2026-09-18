@@ -9,7 +9,7 @@ import pytest
 
 from hitl_ops.config import Settings
 from tests.conftest import make_settings as base_make_settings
-from tests.integration.conftest import reset_schema, run_alembic_upgrade
+from tests.integration.conftest import prepare_database
 
 API_SECRET = "api-test-secret"
 
@@ -47,6 +47,5 @@ def settings() -> Settings:
 
 @pytest.fixture
 def migrated_database(settings: Settings) -> Settings:
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
     return settings

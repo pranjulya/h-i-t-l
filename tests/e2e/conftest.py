@@ -11,7 +11,7 @@ from hitl_ops.api.app import create_app
 from hitl_ops.infrastructure.database import build_engine, build_sessionmaker
 from hitl_ops.infrastructure.orm import RoleAssignmentORM
 from tests.api.conftest import API_SECRET, api_settings, bearer  # noqa: F401
-from tests.integration.conftest import reset_schema, run_alembic_upgrade
+from tests.integration.conftest import prepare_database
 
 
 def e2e_settings() -> object:
@@ -19,8 +19,7 @@ def e2e_settings() -> object:
 
 
 def _prepare(settings: object) -> None:
-    reset_schema(settings.database_url)  # type: ignore[attr-defined]
-    run_alembic_upgrade(settings.database_url, "head")  # type: ignore[attr-defined]
+    prepare_database(settings.database_url)  # type: ignore[attr-defined]
 
 
 def _engine() -> AsyncEngine:

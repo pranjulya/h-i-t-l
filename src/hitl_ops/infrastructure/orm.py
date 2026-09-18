@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -128,6 +129,14 @@ class IdempotencyRecordORM(Base):
 class OutboxMessageORM(Base):
     __tablename__ = "outbox_messages"
     __table_args__ = (Index("ix_outbox_messages_pending", "published_at", "created_at"),)
+
+    # Monotonic insertion order: publication and the audit sequence it feeds
+    # must follow causal order even when rows share created_at.
+    sequence: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        server_default=text("nextval('outbox_messages_sequence_seq')"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     topic: Mapped[str] = mapped_column(String(64), nullable=False)

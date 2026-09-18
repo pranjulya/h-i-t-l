@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from hitl_ops.config import Environment, Settings
 from hitl_ops.infrastructure.database import build_engine
 
-DEFAULT_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@localhost:54329/hitl_ops"
+DEFAULT_TEST_DATABASE_URL = "postgresql+asyncpg://postgres@localhost:54329/hitl_ops_tests"
 
 _SENSITIVE_ENV_VARS = (
     "APP_ENV",

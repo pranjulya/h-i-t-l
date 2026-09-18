@@ -18,7 +18,7 @@ Start with [Implementation.md](Implementation.md), then follow the review order 
 
 - `uv sync` — create the virtual environment from the lock file (Python 3.12 managed by uv).
 - `uv run uvicorn hitl_ops.api.app:create_app --factory --reload` — start the API locally.
-- `uv run pytest -q` — unit and integration tests; integration/security/failure tests require PostgreSQL via `TEST_DATABASE_URL` (default `postgresql+asyncpg://postgres@localhost:54329/hitl_ops`) and fail when it is unreachable.
+- `uv run pytest -q` — unit and integration tests; integration/security/failure tests require PostgreSQL via `TEST_DATABASE_URL` (default `postgresql+asyncpg://postgres@localhost:54329/hitl_ops_tests`, created on demand) so they never touch the demo database.
 - `uv run ruff format . && uv run ruff check . && uv run mypy` — format, lint, and strict typing.
 - `uv run alembic upgrade head` — apply migrations.
 - `docker compose up --build` — full development stack.

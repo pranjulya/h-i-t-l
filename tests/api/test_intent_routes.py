@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from hitl_ops.api.app import create_app
 from tests.api.conftest import api_settings, bearer
-from tests.integration.conftest import reset_schema, run_alembic_upgrade
+from tests.integration.conftest import prepare_database
 
 _SCALE_BODY = {
     "tool": "scale_service",
@@ -19,8 +19,7 @@ _SCALE_BODY = {
 
 def _prepare() -> None:
     settings = api_settings()
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
 
 
 def test_create_intent_returns_routed_snapshot() -> None:

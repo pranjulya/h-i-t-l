@@ -93,3 +93,57 @@ async def test_every_transition_has_exactly_one_audit_event(
         )
     ).scalar_one()
     assert created_events == 1
+
+
+async def test_publication_follows_causal_order_with_equal_timestamps(
+    migrated_database: str, engine: AsyncEngine
+) -> None:
+    """Rows written in one transaction share created_at; audit must still start
+    at the aggregate's creation event and follow insertion order."""
+
+    import uuid
+
+    from hitl_ops.domain.enums import IntentSource, ToolName
+    from hitl_ops.domain.models import CreateIntentCommand
+    from hitl_ops.infrastructure.notification import RecordingNotificationSink
+    from hitl_ops.infrastructure.outbox import OutboxPublisher
+    from hitl_ops.infrastructure.repositories import IntentRepository
+
+    maker = build_sessionmaker(engine)
+    command = CreateIntentCommand(
+        tenant_id="tenant-1",
+        intent_id=uuid.uuid4(),
+        revision=1,
+        tool=ToolName.SCALE_SERVICE,
+        canonical_parameters={"environment": "staging", "service": "api", "replicas": 1},
+        intent_digest="d" * 64,
+        requester_id="user-1",
+        requester_rationale="order check",
+        source=IntentSource.DIRECT,
+        command_id=uuid.uuid4().hex,
+        correlation_id=uuid.uuid4().hex,
+        actor_id="user-1",
+    )
+    async with maker() as session, session.begin():
+        await IntentRepository(session).create(command)
+
+    # The publisher commits its own delivery transactions, so it runs after the
+    # state transaction commits (delivery never holds the state row locks).
+    stats = await OutboxPublisher(maker, RecordingNotificationSink()).publish_pending()
+    assert stats["audited"] >= 1
+
+    async with maker() as session, session.begin():
+        rows = (
+            (
+                await session.execute(
+                    select(AuditEventORM)
+                    .where(AuditEventORM.aggregate_id == command.intent_id)
+                    .order_by(AuditEventORM.sequence)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert rows, "audit evidence was not published"
+    assert rows[0].event_type == "intent_created"
+    assert [row.sequence for row in rows] == list(range(1, len(rows) + 1))

@@ -103,7 +103,7 @@ Base path: `/v1`. All mutation requests require `Idempotency-Key`; clients may s
 
 ### `POST /intents`
 
-Input: `{tool, parameters, rationale, source}`. Output `201`: `{intent_id, revision, digest, risk, policy, state, state_version, approval_requirements, expires_at, links}`. Unknown/extra fields fail with `422 VALIDATION_FAILED`. Same idempotency key and request returns original response; different body returns `409 IDEMPOTENCY_CONFLICT`.
+Input: `{tool, parameters, rationale}`. The server derives the actor, tenant, and source (`DIRECT` here, `AGENT` on the agent route); extra fields fail with `422 VALIDATION_FAILED`. Output `201`: `{intent_id, revision, digest, risk, policy, state, state_version, approval_requirements, expires_at, links}`. Unknown/extra fields fail with `422 VALIDATION_FAILED`. Same idempotency key and request returns original response; different body returns `409 IDEMPOTENCY_CONFLICT`.
 
 ### `POST /agent/intents`
 
@@ -115,7 +115,7 @@ Returns tenant-scoped current revision, risk/policy summaries, approvals, execut
 
 ### `POST /intents/{intent_id}/approvals`
 
-Input: `{revision, intent_digest, level, decision, reason, expected_state_version}`. Output `200` snapshot. Server ignores any client-supplied actor/role. Stale digest/version returns `409`.
+Input: `{revision, intent_digest, level, decision, reason, expected_state_version, obligations}`. The actor comes only from the validated token and must hold the policy's required roles (current DB assignments) and required scopes (token `scope` claim); every declared obligation must be acknowledged in `obligations` or the decision is refused. Output `200` snapshot. Server ignores any client-supplied actor/role. Stale digest/version returns `409`.
 
 ### `POST /intents/{intent_id}/cancel`
 

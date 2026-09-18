@@ -41,7 +41,7 @@ services:
       APP_ENV: development
       LOG_LEVEL: INFO
       DATABASE_URL: postgresql+asyncpg://hitl:hitl@db:5432/hitl_ops
-      IDENTITY_SHARED_SECRET: learning-demo-identity-secret
+      IDENTITY_SHARED_SECRET: learning-demo-identity-secret-32-bytes-minimum
     ports:
       - "8000:8000"
     depends_on:
