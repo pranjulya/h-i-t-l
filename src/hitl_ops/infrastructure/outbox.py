@@ -40,6 +40,7 @@ _AUDIT_TOPICS = {
     "execution.reconciliation_exhausted",
     "administration.role_changed",
     "administration.policy_changed",
+    "notification.delivered",
 }
 _NOTIFICATION_TOPICS = {"intent.transitioned"}
 _NOTIFICATION_STATES = ("PENDING_APPROVAL_1", "PENDING_APPROVAL_2")
@@ -198,6 +199,7 @@ class OutboxPublisher:
             "intent.transitioned": "state_transitioned",
             "risk.evaluated": "risk_evaluated",
             "policy.evaluated": "policy_evaluated",
+            "notification.delivered": "notification_delivered",
         }.get(
             row.topic,
             row.topic.replace("execution.", "execution_").replace(

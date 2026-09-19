@@ -70,7 +70,7 @@ Audit: `event_id`, tenant, aggregate ID/revision, sequence, event type, actor, t
 
 ### `role_assignments`
 
-`id`, tenant, principal, role, environment/resource scope, valid-from, valid-until, revoked-at, granted-by. Current authorization is evaluated from these assignments plus validated identity claims.
+`id`, tenant, principal, role, environment/resource scope, `scopes`, valid-from, valid-until, revoked-at, granted-by. Current authorization (roles *and* scopes) is evaluated from these assignments; validated identity claims supply the actor, tenant, and a decision-time scope assertion, never authority by themselves.
 
 ## 4. Canonical intent
 
@@ -115,7 +115,7 @@ Returns tenant-scoped current revision, risk/policy summaries, approvals, execut
 
 ### `POST /intents/{intent_id}/approvals`
 
-Input: `{revision, intent_digest, level, decision, reason, expected_state_version, obligations}`. The actor comes only from the validated token and must hold the policy's required roles (current DB assignments) and required scopes (token `scope` claim); every declared obligation must be acknowledged in `obligations` or the decision is refused. Output `200` snapshot. Server ignores any client-supplied actor/role. Stale digest/version returns `409`.
+Input: `{revision, intent_digest, level, decision, reason, expected_state_version, obligations}`. The actor comes only from the validated token; the decision requires the policy's required roles and scopes as **current DB assignments** (the token must also assert the scope). Every declared obligation must be acknowledged in `obligations` or the decision is refused. Roles and scopes are both rechecked before execution, so revoking either blocks an already-approved intent. Output `200` snapshot. Server ignores any client-supplied actor/role. Stale digest/version returns `409`.
 
 ### `POST /intents/{intent_id}/cancel`
 
@@ -123,7 +123,7 @@ Input: `{revision, reason, expected_state_version}`. Output `200` snapshot or `4
 
 ### Administrator contracts
 
-`POST /admin/role-assignments`, `POST /admin/role-assignments/{id}/revoke`, and `POST /admin/policy-bundles` are reserved for the Administrator role and are served by the Phase 03 administration commands. Policy bundles are authored in source control; the admin contract registers/activates a reviewed version. Every change appends an administrative audit event (§10); historic approval evidence is never altered.
+`POST /admin/role-assignments`, `POST /admin/role-assignments/{id}/revoke`, and `POST /admin/policy-bundles` are reserved for the Administrator role and are served by the Phase 03 administration commands. Role grants carry the assignment's environments and scopes. Policy bundles are authored in source control; the admin contract registers/activates a reviewed version. Every change appends an administrative audit event (§10); historic approval evidence is never altered.
 
 ### `GET /intents/{intent_id}/events`
 
@@ -150,7 +150,7 @@ PostgreSQL uniqueness and row-level locking are sufficient for V1. A Redis lock 
 
 1. Load/lock claimed intent and current state/version.
 2. Recompute canonical digest.
-3. Check approval TTL, route, levels, principals, and current role/scope.
+3. Check approval TTL, route, levels, principals, and each approver's current role *and* scope assignments.
 4. Re-evaluate current risk and policy bundle.
 5. Fetch live target identity/version/health/metadata.
 6. Verify obligations and compare approved/live material context.

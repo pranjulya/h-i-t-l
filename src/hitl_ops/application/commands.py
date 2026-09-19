@@ -37,7 +37,7 @@ from hitl_ops.domain.errors import (
 )
 from hitl_ops.domain.models import IntentSnapshot
 from hitl_ops.domain.state_machine import CANCELLABLE_STATES, require_transition
-from hitl_ops.infrastructure.authorization import current_roles
+from hitl_ops.infrastructure.authorization import current_roles, current_scopes
 from hitl_ops.infrastructure.identity import AuthenticatedActor
 from hitl_ops.infrastructure.orm import (
     ActionIntentORM,
@@ -260,8 +260,14 @@ class ApprovalCommandService:
                     "actor does not hold the role required for this approval level"
                 )
 
+        db_scopes: frozenset[str] = frozenset()
         if command.decision is ApprovalDecision.APPROVE:
+            # The caller's token must assert the scope, and the assignment-granted
+            # scopes are the current DB authority (ADR-008) rechecked again at
+            # execution time.
             self._enforce_scopes(command.actor.scopes, policy_row.required_scopes)
+            db_scopes = await current_scopes(self._session, command.actor, environment)
+            self._enforce_scopes(db_scopes, policy_row.required_scopes)
             self._enforce_obligations(command.obligations, policy_row.obligations)
 
         if (
@@ -284,7 +290,8 @@ class ApprovalCommandService:
                 actor_roles_snapshot=actor_roles,
                 scope_snapshot={
                     "environment": environment,
-                    "scopes": sorted(command.actor.scopes),
+                    "scopes": sorted(db_scopes),
+                    "token_scopes": sorted(command.actor.scopes),
                     "obligations": command.obligations,
                 },
                 reason=command.reason,

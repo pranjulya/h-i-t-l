@@ -348,6 +348,9 @@ class RoleAssignmentORM(Base):
     principal_id: Mapped[str] = mapped_column(String(255), nullable=False)
     role: Mapped[str] = mapped_column(String(63), nullable=False)
     environments: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    # Scopes are DB-backed current authority (ADR-008): they are rechecked at
+    # decision time and again before execution, like roles.
+    scopes: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     environments_key: Mapped[str] = mapped_column(String(512), nullable=False, default="")
     valid_from: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

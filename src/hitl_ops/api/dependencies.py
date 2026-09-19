@@ -22,8 +22,14 @@ async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
         try:
             yield session
             await session.commit()
-        except Exception:
-            await session.rollback()
+        except Exception as exc:
+            # Errors that recorded durable state (e.g. an EXPIRED transition)
+            # must be committed, not rolled back, or the recorded state is lost
+            # and a retry keeps observing the pre-error state.
+            if getattr(exc, "persist_state", False):
+                await session.commit()
+            else:
+                await session.rollback()
             raise
 
 
