@@ -1,6 +1,6 @@
 # Implementation phases
 
-All phases 00–09 are implemented and `TESTED` locally (unit, contract, integration on PostgreSQL 16, e2e, security, and failure suites; Ruff and strict mypy clean). `REVIEWED`/`COMPLETE` are reached through the user review gate.
+All phases 00–09 are `COMPLETE`: implemented, tested, reviewed (review findings resolved), and verified on `main` with the release evidence in `docs/architecture/architecture-review.md` §12.
 
 Every phase contains status, goal, rationale, prerequisites, concepts, exact planned files, architecture impact, data flow, edge/failure cases, tests, acceptance criteria, learning outcomes, interview questions, and Definition of Done. Follow numeric order; do not combine phases merely to save review time.
 

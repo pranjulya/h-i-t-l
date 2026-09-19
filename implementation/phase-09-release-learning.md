@@ -1,6 +1,6 @@
 # Phase 09 — Release, End-to-End Proof, and Learning Completion
 
-**Status:** TESTED — implemented with end-to-end journey tests for all five tools and approval routes, restart durability, audit-chain reconstruction, release checklist and demo script, architecture-review evidence addendum; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
+**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
 
 ## Goal
 

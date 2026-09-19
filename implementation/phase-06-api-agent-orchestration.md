@@ -1,6 +1,6 @@
 # Phase 06 — API and Agent Orchestration
 
-**Status:** TESTED — implemented with API/agent route tests (creation, idempotent replay, decisions, admin lifecycle, error envelope, agent-to-worker flow), Ruff, and strict mypy; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
+**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
 
 ## Goal
 

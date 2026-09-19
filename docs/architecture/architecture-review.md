@@ -130,3 +130,26 @@ Crash recovery after provider send, adapter precondition enforcement, and
 the Compose topology are covered by `tests/failure/test_worker_crash.py`,
 `tests/contract/test_adapter_contract.py`, and the CI `compose-smoke` job
 respectively.
+
+## 12. Release verification and accepted limitations
+
+Verified on merged `main` (`b38b0aa`), PostgreSQL 16.15, Python 3.12:
+
+- **Automated suite:** 344 tests pass — unit, contract, integration, e2e, security, failure. Ruff format/lint and strict mypy exit 0 (the same command set CI runs).
+- **Migrations:** clean-database rehearsal `upgrade head → downgrade base → upgrade head`; 11 domain tables, downgrade leaves only `alembic_version`, head is `0008`. Readiness fails closed on a revision/head mismatch.
+- **Live end-to-end:** API + supervised worker + demo adapter; `tools/e2e_check.py` reports 41/41 — all five tools, all four risk routes, two-step CRITICAL with distinct approvers, rejection, cancellation, idempotent replay, mismatch conflict, unknown → reconciliation, audit-chain reconstruction, restart durability, and the security spot checks.
+- **Targeted proofs of the final review findings:** (a) an expired approval returns 409 *and* the intent durably becomes `EXPIRED`, with a fresh-key retry observing the conflict; (b) every live-target lookup failure fails closed — timeout, transport error, malformed response — and none leaves a claim stranded in `REVALIDATING`; (c) removing an approver's scopes after approval blocks execution with `approver_scopes_revoked` while the role remains granted; (d) `notification_delivered` appears in the hash-linked audit trail; (e) production configuration rejects a short or demo identity secret.
+- **Operations:** `docs/operations/runbooks.md` (six runbooks), `docs/operations/release-checklist.md`, `docs/operations/demo-script.md`; CI runs quality, tests, migrations, docker build, and a compose smoke test on every PR.
+
+### Accepted limitations (explicit, carried as V1 residual risk)
+
+| Limitation | Why accepted | What production requires |
+|---|---|---|
+| Identity is shared-secret HS256 | Learning scope; validation semantics (issuer, audience, signature, time, required claims) match OIDC | OIDC discovery/JWKS, key rotation, minimum-secret enforcement (now enforced in config) — ADR-008 |
+| Demo infrastructure adapter, provider evidence in worker memory | No real cloud mutation is needed to prove the control plane; a worker restart therefore loses status-lookup evidence and an ambiguous outcome stays escalated | A real typed adapter with durable provider status lookup — ADR-007/ADR-010 |
+| LLM provider is disabled by default | The direct intent API remains fully usable; the model can never hold authority | A configured provider behind the existing orchestrator boundary |
+| In-process rate limiting, single replica | Abuse mitigation, never correctness — PostgreSQL constraints enforce invariants | Shared/shared-nothing limiter when horizontally scaled |
+| No Redis | Correctness never depended on it; tests prove its absence changes nothing | Add only on measured contention, as an accelerator — ADR-006 |
+| LangGraph deferred | No measured orchestration value yet; graph checkpoints must never be authoritative state | Post-V1 evaluation — ADR-012 |
+
+Reopening any of these requires the PRD/architecture path in `Implementation.md` (authoritative precedence) rather than a code-only change.

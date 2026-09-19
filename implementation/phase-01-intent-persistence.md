@@ -1,6 +1,6 @@
 # Phase 01 — Immutable Intent Domain and Persistence
 
-**Status:** TESTED — implemented with passing unit/integration tests (golden digest vectors, migration rehearsal, constraint and rollback proofs), Ruff, and strict mypy; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
+**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
 
 ## Goal
 
