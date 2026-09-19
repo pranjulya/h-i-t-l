@@ -49,6 +49,7 @@ DEFAULT_TARGET_FETCH_TIMEOUT_SECONDS = 10.0
 # The target read is idempotent, so a bounded retry is safe; a persistent
 # failure must still fail closed rather than strand the claim.
 TARGET_FETCH_ATTEMPTS = 2
+TARGET_FETCH_RETRY_DELAY_SECONDS = 0.25
 DEFAULT_STATUS_LOOKUP_TIMEOUT_SECONDS = 10.0
 
 
@@ -418,6 +419,10 @@ class RevalidationService:
         snapshot: TargetSnapshot | None = None
         failure_reason = "target_fetch_failed"
         for attempt in range(1, TARGET_FETCH_ATTEMPTS + 1):
+            if attempt > 1:
+                # Small pause between attempts; the read is idempotent, so a
+                # transient blip should not fail the whole claim.
+                await asyncio.sleep(TARGET_FETCH_RETRY_DELAY_SECONDS)
             try:
                 snapshot = await asyncio.wait_for(
                     target_query.fetch(tool, parameters),
