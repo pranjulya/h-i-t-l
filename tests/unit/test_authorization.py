@@ -140,3 +140,46 @@ def test_require_role_raises_forbidden() -> None:
     require_role(frozenset({"approver"}), "approver")
     with pytest.raises(ForbiddenError):
         require_role(frozenset({"auditor"}), "approver")
+
+
+def _scoped_assignment(scopes: tuple[str, ...], **overrides: object) -> RoleAssignment:
+    values: dict = {
+        "role": "approver",
+        "valid_from": _NOW - timedelta(days=1),
+        "valid_until": None,
+        "revoked_at": None,
+        "environments": (),
+        "scopes": scopes,
+    }
+    values.update(overrides)
+    return RoleAssignment(**values)  # type: ignore[arg-type]
+
+
+def test_current_scopes_union_valid_assignments() -> None:
+    from hitl_ops.infrastructure.identity import evaluate_current_scopes
+
+    assignments = (
+        _scoped_assignment(("ops:read",)),
+        _scoped_assignment(("ops:write",)),
+    )
+    assert evaluate_current_scopes(assignments, _NOW) == frozenset({"ops:read", "ops:write"})
+
+
+def test_scope_removal_expires_with_the_assignment() -> None:
+    from hitl_ops.infrastructure.identity import evaluate_current_scopes
+
+    revoked = _scoped_assignment(("ops:write",), revoked_at=_NOW - timedelta(minutes=1))
+    expired = _scoped_assignment(("ops:write",), valid_until=_NOW - timedelta(minutes=1))
+    future = _scoped_assignment(("ops:write",), valid_from=_NOW + timedelta(days=1))
+    assert evaluate_current_scopes((revoked, expired, future), _NOW) == frozenset()
+    assert evaluate_current_scopes((_scoped_assignment(()),), _NOW) == frozenset()
+
+
+def test_scope_environment_scope_is_respected() -> None:
+    from hitl_ops.infrastructure.identity import evaluate_current_scopes
+
+    scoped = _scoped_assignment(("ops:write",), environments=("staging",))
+    assert evaluate_current_scopes((scoped,), _NOW, environment="staging") == frozenset(
+        {"ops:write"}
+    )
+    assert evaluate_current_scopes((scoped,), _NOW, environment="production") == frozenset()

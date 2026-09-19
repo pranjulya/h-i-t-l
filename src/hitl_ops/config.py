@@ -17,6 +17,15 @@ _DEFAULT_DATABASE_URL = "postgresql+asyncpg://hitl:hitl@localhost:5432/hitl_ops"
 _REJECTED_PRODUCTION_PASSWORDS = frozenset({"hitl", "postgres", "password", "changeme", ""})
 _MAX_REQUEST_BYTES_CEILING = 16 * 1024 * 1024
 _MAX_RATE_LIMIT_PER_MINUTE = 1_000_000
+# HS256 keys shorter than this are brute-forceable; the demo secrets that
+# ship in compose/dev tooling must never reach production.
+_MIN_IDENTITY_SECRET_BYTES = 32
+_DEMO_IDENTITY_SECRETS = frozenset(
+    {
+        "learning-demo-identity-secret",
+        "learning-demo-identity-secret-32-bytes-minimum",
+    }
+)
 
 
 class Environment(enum.StrEnum):
@@ -85,6 +94,12 @@ class Settings(BaseSettings):
             raise ValueError("production rejects default database credentials")
         if self.identity_shared_secret is None:
             raise ValueError("production requires configured identity verification material")
+        if len(self.identity_shared_secret.encode("utf-8")) < _MIN_IDENTITY_SECRET_BYTES:
+            raise ValueError(
+                f"production identity secret must be at least {_MIN_IDENTITY_SECRET_BYTES} bytes"
+            )
+        if self.identity_shared_secret in _DEMO_IDENTITY_SECRETS:
+            raise ValueError("production rejects the demo identity secret")
         return self
 
     @property

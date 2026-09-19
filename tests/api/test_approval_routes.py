@@ -35,6 +35,7 @@ def _grant_approver(engine: AsyncEngine, principal: str) -> None:
                     principal_id=principal,
                     role="approver",
                     environments=None,
+                    scopes=["ops:read", "ops:write"],
                     granted_by="test",
                 )
             )
@@ -129,11 +130,24 @@ def test_expired_approval_replays_same_error_and_conflicts_on_new_body(
         changed = {**payload, "reason": "different reason"}
         conflict = _approve(client, pending["intent_id"], changed, "approver-1", "exp-1")
         assert conflict.status_code == 409
-        # The stored 409 error outcome is authoritative for this key: the
-        # retry observes EXPIRED state deterministically. The distinct-body
-        # conflict contract is covered at the service layer and on live
-        # intents; see test_idempotent_replay_returns_original_response.
-        assert conflict.json()["error"]["code"] == "APPROVAL_EXPIRED"
+        # Reusing the key with a different body is the documented idempotency
+        # conflict. (Previously this returned APPROVAL_EXPIRED only because the
+        # expiry path rolled the reservation back, which is the durability bug
+        # this test now guards.)
+        assert conflict.json()["error"]["code"] == "IDEMPOTENCY_CONFLICT"
+
+        # Durability: the EXPIRED transition must survive the 409, otherwise a
+        # retry would keep seeing the pre-expiry state forever.
+        current = client.get(f"/v1/intents/{pending['intent_id']}", headers=bearer("user-1"))
+        assert current.status_code == 200
+        assert current.json()["state"] == "EXPIRED"
+        assert current.json()["state_version"] == pending["version"] + 1
+
+        # A fresh key on an already-expired revision is a conflict, never a
+        # silent approval.
+        retry = _approve(client, pending["intent_id"], payload, "approver-1", "exp-2")
+        assert retry.status_code == 409
+        assert retry.json()["error"]["code"] == "STATE_CONFLICT"
 
 
 def test_approval_stale_digest_conflicts(migrated_database, engine) -> None:

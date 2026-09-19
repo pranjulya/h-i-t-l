@@ -32,6 +32,7 @@ class GrantRoleCommand:
     actor: AuthenticatedActor
     command_id: str
     reason: str
+    scopes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +114,7 @@ class AdministrationService:
             role=command.role,
             environments=environments or None,
             environments_key=_environments_key(environments),
+            scopes=list(command.scopes) or None,
             valid_until=command.valid_until,
             granted_by=command.actor.actor_id,
         )
@@ -125,6 +127,7 @@ class AdministrationService:
                 "tenant_id": command.tenant_id,
                 "principal_id": command.principal_id,
                 "role": command.role,
+                "scopes": list(command.scopes),
                 "action": "granted",
                 "actor_id": command.actor.actor_id,
                 "command_id": command.command_id,

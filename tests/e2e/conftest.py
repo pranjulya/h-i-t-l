@@ -40,6 +40,7 @@ def _grant(engine: AsyncEngine, principal: str, role: str) -> None:
                     principal_id=principal,
                     role=role,
                     environments=None,
+                    scopes=["ops:read", "ops:write"],
                     granted_by="e2e",
                 )
             )

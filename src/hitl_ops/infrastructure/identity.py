@@ -84,6 +84,7 @@ class RoleAssignment:
     valid_until: datetime | None
     revoked_at: datetime | None
     environments: tuple[str, ...]
+    scopes: tuple[str, ...] = ()
 
 
 def evaluate_current_roles(
@@ -107,6 +108,31 @@ def evaluate_current_roles(
         if assignment.environments and environment not in assignment.environments:
             continue
         current.add(assignment.role)
+    return frozenset(current)
+
+
+def evaluate_current_scopes(
+    assignments: tuple[RoleAssignment, ...], at: datetime, environment: str | None = None
+) -> frozenset[str]:
+    """Pure evaluation of current scopes from assignments.
+
+    Uses the same validity/revocation/environment rules as
+    ``evaluate_current_roles`` so an approver's scopes are rechecked against the
+    same current authority at decision time and again before execution.
+    """
+
+    at = at.astimezone(UTC)
+    current: set[str] = set()
+    for assignment in assignments:
+        if assignment.revoked_at is not None:
+            continue
+        if assignment.valid_from > at:
+            continue
+        if assignment.valid_until is not None and assignment.valid_until <= at:
+            continue
+        if assignment.environments and environment not in assignment.environments:
+            continue
+        current.update(assignment.scopes)
     return frozenset(current)
 
 

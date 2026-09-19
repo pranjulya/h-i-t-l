@@ -12,6 +12,7 @@ from hitl_ops.infrastructure.identity import (
     AuthenticatedActor,
     RoleAssignment,
     evaluate_current_roles,
+    evaluate_current_scopes,
 )
 from hitl_ops.infrastructure.orm import RoleAssignmentORM
 
@@ -38,6 +39,7 @@ async def load_assignments(
             valid_until=row.valid_until,
             revoked_at=row.revoked_at,
             environments=tuple(row.environments or ()),
+            scopes=tuple(row.scopes or ()),
         )
         for row in rows
     )
@@ -48,6 +50,22 @@ async def current_roles(
 ) -> frozenset[str]:
     assignments = await load_assignments(session, actor.tenant_id, actor.actor_id)
     return evaluate_current_roles(assignments, datetime.now(UTC), environment)
+
+
+async def current_scopes(
+    session: AsyncSession, actor: AuthenticatedActor, environment: str | None
+) -> frozenset[str]:
+    assignments = await load_assignments(session, actor.tenant_id, actor.actor_id)
+    return evaluate_current_scopes(assignments, datetime.now(UTC), environment)
+
+
+async def scopes_for_principal(
+    session: AsyncSession, tenant_id: str, principal_id: str, environment: str | None
+) -> frozenset[str]:
+    """Current scopes of an arbitrary principal, used to recheck approvers."""
+
+    assignments = await load_assignments(session, tenant_id, principal_id)
+    return evaluate_current_scopes(assignments, datetime.now(UTC), environment)
 
 
 async def require_administrator(session: AsyncSession, actor: AuthenticatedActor) -> None:

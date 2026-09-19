@@ -28,6 +28,7 @@ class GrantRoleBody(BaseModel):
     principal_id: str = Field(min_length=1, max_length=255)
     role: str = Field(min_length=1, max_length=63)
     environments: list[str] = Field(default_factory=list, max_length=10)
+    scopes: list[str] = Field(default_factory=list, max_length=20)
     valid_until: datetime | None = None
     reason: str = Field(min_length=1, max_length=2000)
 
@@ -96,6 +97,7 @@ async def grant_role(
             principal_id=body.principal_id,
             role=body.role,
             environments=tuple(body.environments),
+            scopes=tuple(body.scopes),
             valid_until=body.valid_until,
             actor=actor,
             command_id=uuid.uuid4().hex,

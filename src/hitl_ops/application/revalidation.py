@@ -12,7 +12,7 @@ import hashlib
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -34,7 +34,7 @@ from hitl_ops.domain.state_machine import require_transition
 from hitl_ops.infrastructure.authorization import (
     load_assignments,
 )
-from hitl_ops.infrastructure.identity import evaluate_current_roles
+from hitl_ops.infrastructure.identity import evaluate_current_roles, evaluate_current_scopes
 from hitl_ops.infrastructure.orm import (
     ActionIntentORM,
     ApprovalDecisionORM,
@@ -46,6 +46,9 @@ from hitl_ops.infrastructure.orm import (
 
 DEFAULT_CLAIM_LEASE_SECONDS = 60
 DEFAULT_TARGET_FETCH_TIMEOUT_SECONDS = 10.0
+# The target read is idempotent, so a bounded retry is safe; a persistent
+# failure must still fail closed rather than strand the claim.
+TARGET_FETCH_ATTEMPTS = 2
 DEFAULT_STATUS_LOOKUP_TIMEOUT_SECONDS = 10.0
 
 
@@ -132,21 +135,49 @@ def policy_stricter(current: Any, original: Any) -> bool:
 _TARGET_IDENTITY_FIELDS = ("service", "resource_id", "name")
 
 
-async def _critical_levels_authorized(
+async def _approver_failure_reason(
+    session: AsyncSession,
+    tenant_id: str,
+    actor_id: str,
+    required_roles: tuple[str, ...],
+    required_scopes: tuple[str, ...],
+    at: datetime,
+    environment: str | None,
+) -> str | None:
+    """Current authorization of one approving actor, or a stable failure reason.
+
+    Roles and scopes are both rechecked against current DB assignments, so a
+    revocation of either blocks execution.
+    """
+
+    assignments = await load_assignments(session, tenant_id, actor_id)
+    if required_roles and not any(
+        role in evaluate_current_roles(assignments, at, environment) for role in required_roles
+    ):
+        return "approver_no_longer_authorized"
+    if required_scopes and not set(required_scopes) <= evaluate_current_scopes(
+        assignments, at, environment
+    ):
+        return "approver_scopes_revoked"
+    return None
+
+
+async def _critical_levels_failure_reason(
     session: AsyncSession,
     intent: ActionIntentORM,
     decisions: Any,
     required_roles: tuple[str, ...],
+    required_scopes: tuple[str, ...],
     db_now: datetime,
-) -> bool:
-    """Revalidate each critical level against its exact required role.
+) -> str | None:
+    """Revalidate each critical level against its exact role and current scopes.
 
     Level 1 must be held by an actor who currently holds required_roles[0]
     and level 2 by a *distinct* actor who currently holds required_roles[1].
     """
 
     if len(required_roles) < 2:
-        return False
+        return "approver_no_longer_authorized"
     environment = intent.canonical_parameters.get("environment")
     level_actor: dict[int, str] = {}
     for decision in decisions:
@@ -154,13 +185,20 @@ async def _critical_levels_authorized(
             continue
         level_actor.setdefault(decision.level, decision.actor_id)
     if set(level_actor) != {1, 2} or level_actor[1] == level_actor[2]:
-        return False
+        return "approver_no_longer_authorized"
     for level, required_role in ((1, required_roles[0]), (2, required_roles[1])):
-        assignments = await load_assignments(session, intent.tenant_id, level_actor[level])
-        roles = evaluate_current_roles(assignments, db_now, environment)
-        if required_role not in roles:
-            return False
-    return True
+        reason = await _approver_failure_reason(
+            session,
+            intent.tenant_id,
+            level_actor[level],
+            (required_role,),
+            required_scopes,
+            db_now,
+            environment,
+        )
+        if reason is not None:
+            return reason
+    return None
 
 
 def check_preconditions(
@@ -377,14 +415,25 @@ class RevalidationService:
         tool = ToolName(intent.tool)
         parameters = dict(intent.canonical_parameters)
         await self._session.commit()
-        try:
-            snapshot = await asyncio.wait_for(
-                target_query.fetch(tool, parameters),
-                timeout=DEFAULT_TARGET_FETCH_TIMEOUT_SECONDS,
-            )
-        except TimeoutError:
-            return await self._fail_after_fetch_timeout(
-                tenant_id, intent_id, revision, worker_id, command_id
+        snapshot: TargetSnapshot | None = None
+        failure_reason = "target_fetch_failed"
+        for attempt in range(1, TARGET_FETCH_ATTEMPTS + 1):
+            try:
+                snapshot = await asyncio.wait_for(
+                    target_query.fetch(tool, parameters),
+                    timeout=DEFAULT_TARGET_FETCH_TIMEOUT_SECONDS,
+                )
+                break
+            except TimeoutError:
+                failure_reason = "target_fetch_timeout"
+            except Exception:
+                failure_reason = "target_fetch_failed"
+        if snapshot is None:
+            # The phase-1 claim is already committed, so an unhandled failure
+            # here would leave the intent stranded in REVALIDATING where no
+            # worker pass picks it up. Fail closed with a durable outcome.
+            return await self._fail_after_fetch_failure(
+                tenant_id, intent_id, revision, worker_id, command_id, failure_reason
             )
 
         # Phase 3 (locked): re-lock and revalidate gates 1-3 plus the fetched
@@ -469,15 +518,20 @@ class RevalidationService:
                 issued_at=db_now,
             )
 
-    async def _fail_after_fetch_timeout(
+    async def _fail_after_fetch_failure(
         self,
         tenant_id: str,
         intent_id: uuid.UUID,
         revision: int,
         worker_id: str,
         command_id: str,
+        reason_code: str,
     ) -> RevalidationFailure:
-        """Fail closed after a target-fetch timeout, in a fresh transaction."""
+        """Fail closed after any target-fetch failure, in a fresh transaction.
+
+        Runs in its own transaction so the outcome is durable even though the
+        claim was committed in phase 1; the intent never stays in REVALIDATING.
+        """
 
         async with self._session.begin():
             row = (
@@ -510,16 +564,16 @@ class RevalidationService:
                 IntentState.STALE,
                 actor_id=worker_id,
                 command_id=command_id,
-                reason_code="target_fetch_timeout",
+                reason_code=reason_code,
                 db_now=db_now,
             )
             execution.status = "FAILED"
-            execution.error_code = "target_fetch_timeout"
+            execution.error_code = reason_code
             execution.finished_at = db_now
             await self._session.flush()
             return RevalidationFailure(
                 state=IntentState.STALE,
-                reason_code="target_fetch_timeout",
+                reason_code=reason_code,
                 execution_id=execution.id,
             )
 
@@ -573,30 +627,39 @@ class RevalidationService:
                 .scalars()
                 .all()
             )
+            environment = intent.canonical_parameters.get("environment")
             if route is ApprovalRoute.CRITICAL_TWO_STEP:
-                if not await _critical_levels_authorized(
+                reason = await _critical_levels_failure_reason(
                     self._session,
                     intent,
                     decisions,
                     tuple(policy_row.required_roles),
+                    tuple(policy_row.required_scopes),
                     db_now,
-                ):
-                    return fail(IntentState.STALE, "approver_no_longer_authorized")
+                )
+                if reason is not None:
+                    return fail(IntentState.STALE, reason)
             else:
                 current_authorized = 0
+                last_reason: str | None = None
                 for decision in decisions:
-                    assignments = await load_assignments(
-                        self._session, intent.tenant_id, decision.actor_id
+                    reason = await _approver_failure_reason(
+                        self._session,
+                        intent.tenant_id,
+                        decision.actor_id,
+                        tuple(policy_row.required_roles),
+                        tuple(policy_row.required_scopes),
+                        db_now,
+                        environment,
                     )
-                    roles = evaluate_current_roles(
-                        assignments,
-                        datetime.now(UTC),
-                        intent.canonical_parameters.get("environment"),
-                    )
-                    if any(role in roles for role in policy_row.required_roles):
+                    if reason is None:
                         current_authorized += 1
+                    else:
+                        # Keep the precise cause (role vs scope) for the audit
+                        # trail instead of a generic authorization failure.
+                        last_reason = reason
                 if current_authorized < 1:
-                    return fail(IntentState.STALE, "approver_no_longer_authorized")
+                    return fail(IntentState.STALE, last_reason or "approver_no_longer_authorized")
 
         # Gate 3: current policy re-evaluation (stricter result stales).
         tool = ToolName(intent.tool)
