@@ -27,6 +27,7 @@ single PostgreSQL, no Redis).
 - **Containment:** stop non-essential publishers; keep the API read-only if the audit sink cannot be restored quickly (evidence continuity is part of the guarantee).
 - **Recovery:** restore the sink (or notification transport); the publisher retries with backoff automatically. Backlog drains oldest-first.
 - **Evidence preservation:** outbox rows are never deleted before audit publication; verify `verify_aggregate_chain` passes after the backlog drains.
+- **Reading the signal:** while nothing has been published for an aggregate, the events view reports `chain_valid: false` with `chain_problem: "empty audit chain"`. That is the backlog, not tampering; it clears once the publisher catches up.
 
 ## RB-4 — Credential exposure / rotation
 

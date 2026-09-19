@@ -28,6 +28,35 @@ def run_alembic_downgrade(database_url: str, target: str) -> None:
     command.downgrade(cfg, target)
 
 
+def ensure_database(database_url: str) -> None:
+    """Create the dedicated test database if it does not exist yet."""
+
+    import asyncpg
+    from sqlalchemy.engine import make_url
+
+    url = make_url(database_url)
+    target = url.database or "hitl_ops_tests"
+
+    async def create() -> None:
+        connection = await asyncpg.connect(
+            host=url.host or "localhost",
+            port=url.port or 5432,
+            user=url.username or "postgres",
+            password=url.password or None,
+            database="postgres",
+        )
+        try:
+            exists = await connection.fetchval(
+                "SELECT 1 FROM pg_database WHERE datname = $1", target
+            )
+            if not exists:
+                await connection.execute(f'CREATE DATABASE "{target}"')
+        finally:
+            await connection.close()
+
+    asyncio.run(create())
+
+
 def reset_schema(database_url: str) -> None:
     async def reset() -> None:
         from sqlalchemy import text
@@ -53,12 +82,18 @@ def reset_schema(database_url: str) -> None:
     asyncio.run(reset())
 
 
-@pytest.fixture
-def migrated_database(settings: Settings) -> str:
-    database_url = settings.database_url
+def prepare_database(database_url: str) -> str:
+    """Create the database if needed, reset its schema, and migrate to head."""
+
+    ensure_database(database_url)
     reset_schema(database_url)
     run_alembic_upgrade(database_url, "head")
     return database_url
+
+
+@pytest.fixture
+def migrated_database(settings: Settings) -> str:
+    return prepare_database(settings.database_url)
 
 
 async def grant_role_directly(

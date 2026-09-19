@@ -36,7 +36,7 @@ jobs:
           --health-timeout 3s
           --health-retries 10
     env:
-      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:54329/hitl_ops
+      TEST_DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:54329/hitl_ops_tests
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5

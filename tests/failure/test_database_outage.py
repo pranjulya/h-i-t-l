@@ -44,11 +44,10 @@ def test_no_mutation_occurs_during_database_uncertainty() -> None:
     """A failed create must leave no partial evidence once the DB returns."""
 
     from hitl_ops.infrastructure.database import build_engine, build_sessionmaker
-    from tests.integration.conftest import reset_schema, run_alembic_upgrade
+    from tests.integration.conftest import prepare_database
 
     settings = api_settings()
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
     with TestClient(create_app(settings)) as client:
         created = client.post(
             "/v1/intents",

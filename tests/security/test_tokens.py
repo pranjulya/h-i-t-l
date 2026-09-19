@@ -15,7 +15,7 @@ from hitl_ops.api.app import create_app
 from hitl_ops.infrastructure.database import build_engine, build_sessionmaker
 from hitl_ops.infrastructure.orm import RoleAssignmentORM
 from tests.api.conftest import API_SECRET, api_settings, bearer
-from tests.integration.conftest import reset_schema, run_alembic_upgrade
+from tests.integration.conftest import prepare_database
 
 _RESTART = {
     "tool": "restart_service",
@@ -25,8 +25,7 @@ _RESTART = {
 
 def _prepare(engine: AsyncEngine) -> None:
     settings = api_settings()
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
 
 
 def _grant(

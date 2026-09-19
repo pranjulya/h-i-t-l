@@ -19,6 +19,7 @@ review.
 
 ## End-to-end proof
 
+- [ ] `uv run python tools/e2e_check.py` passes against the running stack (black-box functional check).
 - [ ] `tests/e2e/test_e2e_journeys.py` passes: LOW auto-allow, MEDIUM policy branches, HIGH single approval, CRITICAL two-step with distinct approvers, rejection, cancellation, duplicate-request replay, unknown reconciliation, audit-chain verification, restart durability.
 - [ ] Concurrent-claim suite proves at-most-one execution per revision (`test_concurrent_claim.py`).
 - [ ] Security suite passes (`tests/security/`); failure suite passes (`tests/failure/`).
@@ -26,7 +27,7 @@ review.
 ## Operations readiness
 
 - [ ] Runbooks exist for: execution unknown, stale approvals, outbox/audit backlog, credential rotation, database loss, notification outage (`docs/operations/runbooks.md`).
-- [ ] Demo script executed once end-to-end (`docs/operations/demo-script.md`).
+- [ ] Demo script executed once end-to-end (`docs/operations/demo-script.md`), including a token minted with `python -m hitl_ops.dev_tokens --actor approver-1` (scopes) and an approval that acknowledges the policy's obligations.
 - [ ] Alerts defined for: execution unknown count, outbox lag, audit backlog, notification backlog, illegal transitions.
 
 ## Documentation and review

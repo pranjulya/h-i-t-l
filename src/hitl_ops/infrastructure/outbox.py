@@ -103,7 +103,7 @@ class OutboxPublisher:
                                 OutboxMessageORM.claim_expires_at <= now,
                             ),
                         )
-                        .order_by(OutboxMessageORM.created_at)
+                        .order_by(OutboxMessageORM.sequence)
                         .limit(self._batch_limit)
                         .with_for_update(skip_locked=True)
                     )

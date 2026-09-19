@@ -5,11 +5,10 @@ from __future__ import annotations
 import pytest
 
 from tests.api.conftest import api_settings  # noqa: F401
-from tests.integration.conftest import reset_schema, run_alembic_upgrade
+from tests.integration.conftest import prepare_database
 
 
 @pytest.fixture
 def hardened_database(settings) -> object:
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
     return settings

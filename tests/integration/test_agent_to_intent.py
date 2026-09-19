@@ -14,7 +14,7 @@ from hitl_ops.infrastructure.database import build_engine, build_sessionmaker
 from hitl_ops.infrastructure.orm import ActionIntentORM
 from hitl_ops.worker import run_worker_tick
 from tests.api.conftest import api_settings, bearer
-from tests.integration.conftest import reset_schema, run_alembic_upgrade
+from tests.integration.conftest import prepare_database
 
 
 def _app_with_provider(provider: dict):
@@ -25,8 +25,7 @@ def _app_with_provider(provider: dict):
 
 def test_agent_path_creates_the_same_intent_as_direct() -> None:
     settings = api_settings()
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
     proposal = {
         "tool": "scale_service",
         "parameters": {"environment": "staging", "service": "api", "replicas": 4},
@@ -56,8 +55,7 @@ def test_agent_path_creates_the_same_intent_as_direct() -> None:
 
 def test_invalid_model_output_creates_no_intent() -> None:
     settings = api_settings()
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
     for bad in (
         {"tool": "deploy_everything", "parameters": {}},
         {
@@ -90,8 +88,7 @@ def test_invalid_model_output_creates_no_intent() -> None:
 
 def test_hostile_context_cannot_bypass_validation() -> None:
     settings = api_settings()
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
     proposal = {
         "tool": "delete_resource",
         "parameters": {
@@ -115,8 +112,7 @@ def test_agent_replay_and_retry_invoke_provider_once() -> None:
     """Reservation precedes the LLM call: duplicate and concurrent requests bill once."""
 
     settings = api_settings()
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
     proposal = {
         "tool": "scale_service",
         "parameters": {"environment": "staging", "service": "api", "replicas": 4},
@@ -157,8 +153,7 @@ def test_agent_replay_and_retry_invoke_provider_once() -> None:
 
 def test_agent_path_feeds_the_worker_to_execution() -> None:
     settings = api_settings()
-    reset_schema(settings.database_url)
-    run_alembic_upgrade(settings.database_url, "head")
+    prepare_database(settings.database_url)
     proposal = {
         "tool": "scale_service",
         "parameters": {"environment": "staging", "service": "api", "replicas": 2},
