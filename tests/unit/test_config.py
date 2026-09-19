@@ -72,6 +72,12 @@ def test_rate_limit_must_be_positive(value: int) -> None:
         Settings(_env_file=None, rate_limit_per_minute=value)
 
 
+@pytest.mark.parametrize("value", [0, -1])
+def test_address_rate_limit_must_be_positive(value: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, address_rate_limit_per_minute=value)
+
+
 def test_limits_reject_values_beyond_the_supported_range() -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, max_request_bytes=64 * 1024 * 1024 * 1024)

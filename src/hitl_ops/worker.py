@@ -12,6 +12,7 @@ evidence, instead of rolling the claim back and re-sending the operation.
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
@@ -37,6 +38,8 @@ from hitl_ops.infrastructure.orm import (
 )
 from hitl_ops.infrastructure.outbox import OutboxPublisher
 from hitl_ops.infrastructure.repositories import PolicyBundleRepository
+
+logger = logging.getLogger(__name__)
 
 _EXECUTABLE_STATES = (IntentState.AUTO_APPROVED.value, IntentState.APPROVED.value)
 _TICK_LIMIT = 5
@@ -112,15 +115,21 @@ async def run_worker_tick(
 
     for execution_id in pending_unknowns:
         command_id = uuid.uuid4().hex
-        async with session_factory() as session, session.begin():
-            reconciliation = ReconciliationService(session, adapter)
-            try:
+        try:
+            async with session_factory() as session, session.begin():
+                reconciliation = ReconciliationService(session, adapter)
                 await reconciliation.reconcile(
                     execution_id=execution_id, worker_id="execution-worker", command_id=command_id
                 )
                 stats["reconciled"] += 1
-            except DomainError:
-                stats["skipped"] += 1
+        except DomainError:
+            stats["skipped"] += 1
+        except Exception:
+            # One poisoned execution must not abort the tick: everything after
+            # this loop (execution of other revisions, outbox publication)
+            # would be starved on every pass until it resolved itself.
+            logger.exception("reconciliation failed for execution %s", execution_id)
+            stats["skipped"] += 1
 
     publisher = OutboxPublisher(
         session_factory,
@@ -129,6 +138,9 @@ async def run_worker_tick(
     publication = await publisher.publish_pending()
     stats["audited"] = publication["audited"]
     stats["notified"] = publication["notified"]
+    # Surfaces a persistently failing audit/notification sink, which is
+    # otherwise only visible inside the publisher.
+    stats["delivery_failed"] = publication["failed"]
     return stats
 
 

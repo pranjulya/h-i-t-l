@@ -117,6 +117,59 @@ async def test_resolved_execution_cannot_reconcile_again(
             )
 
 
+async def test_one_poisoned_reconciliation_does_not_abort_the_tick(
+    monkeypatch: pytest.MonkeyPatch, migrated_database: str, engine: AsyncEngine
+) -> None:
+    """A non-domain failure must not starve the rest of the tick."""
+
+    maker = build_sessionmaker(engine)
+    async with maker() as session, session.begin():
+        for _ in range(2):
+            intent_id = uuid.uuid4()
+            session.add(
+                ActionIntentORM(
+                    tenant_id="tenant-1",
+                    intent_id=intent_id,
+                    revision=1,
+                    tool="scale_service",
+                    canonical_parameters={"environment": "staging", "service": "api"},
+                    intent_digest="e" * 64,
+                    requester_id="user-1",
+                    requester_rationale="r",
+                    source="DIRECT",
+                    state="EXECUTION_UNKNOWN",
+                    state_version=3,
+                )
+            )
+            session.add(
+                ExecutionORM(
+                    tenant_id="tenant-1",
+                    intent_id=intent_id,
+                    intent_revision=1,
+                    operation_key=f"tenant-1:{intent_id}:1",
+                    attempt=1,
+                    status="UNKNOWN",
+                )
+            )
+
+    genuine = ReconciliationService.reconcile
+    calls = {"count": 0}
+
+    async def flaky(self, **kwargs):  # type: ignore[no-untyped-def]
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise RuntimeError("poisoned execution")
+        return await genuine(self, **kwargs)
+
+    monkeypatch.setattr(ReconciliationService, "reconcile", flaky)
+
+    stats = await run_worker_tick(maker, DemoInfrastructureAdapter())
+
+    assert calls["count"] == 2  # the second execution was still attempted
+    assert stats["skipped"] >= 1
+    assert stats["reconciled"] >= 1
+
+
 async def test_reconciled_intent_leaves_terminal_state_consistent(
     migrated_database: str, engine: AsyncEngine
 ) -> None:
