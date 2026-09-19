@@ -96,22 +96,36 @@ def migrated_database(settings: Settings) -> str:
     return prepare_database(settings.database_url)
 
 
+APPROVAL_SCOPES: tuple[str, ...] = ("ops:read", "ops:write")
+_SCOPE_BEARING_ROLES = frozenset(
+    {"approver", "critical_approver_l1", "critical_approver_l2", "administrator"}
+)
+
+
 async def grant_role_directly(
     session: AsyncSession,
     tenant_id: str,
     principal_id: str,
     role: str,
     environments: list[str] | None = None,
+    scopes: tuple[str, ...] | None = None,
 ) -> uuid.UUID:
-    """Seed a role assignment without the administration gate (bootstrap)."""
+    """Seed a role assignment without the administration gate (bootstrap).
+
+    Scope-bearing roles default to the approval scopes so existing journeys stay
+    meaningful; pass ``scopes=()`` to model a grant that lacks them.
+    """
 
     from hitl_ops.infrastructure.orm import RoleAssignmentORM
 
+    if scopes is None:
+        scopes = APPROVAL_SCOPES if role in _SCOPE_BEARING_ROLES else ()
     row = RoleAssignmentORM(
         tenant_id=tenant_id,
         principal_id=principal_id,
         role=role,
         environments=environments,
+        scopes=list(scopes) or None,
         granted_by="bootstrap",
     )
     session.add(row)
@@ -216,6 +230,7 @@ async def create_approved_intent(
                 principal_id=approver,
                 role=role,
                 environments=None,
+                scopes=list(APPROVAL_SCOPES),
                 granted_by="bootstrap",
             )
         )

@@ -4,12 +4,20 @@ from __future__ import annotations
 
 
 class DomainError(Exception):
-    """Base class for domain failures with a stable error code."""
+    """Base class for domain failures with a stable error code.
+
+    ``persist_state`` marks an error raised *after* durable evidence was written
+    to the caller's session (for example the EXPIRED transition recorded when a
+    decision arrives past the approval window). Transaction owners must commit
+    such an error instead of rolling back, or the recorded state is lost and a
+    retry observes the pre-error state forever.
+    """
 
     code = "DOMAIN_ERROR"
     message = "Domain failure."
     retryable = False
     http_status = 400
+    persist_state = False
 
     def __init__(
         self,
@@ -65,6 +73,8 @@ class ApprovalExpiredError(DomainError):
     code = "APPROVAL_EXPIRED"
     message = "Approval window elapsed before the decision."
     http_status = 409
+    # The EXPIRED transition is written before this is raised; callers commit.
+    persist_state = True
 
 
 class IdempotencyConflictError(DomainError):

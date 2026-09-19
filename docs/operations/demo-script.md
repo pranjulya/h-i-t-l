@@ -21,10 +21,12 @@ clears demo data.
 
 ## Request identity and authorization
 
-Every request needs `Authorization: Bearer <token>`. Roles come from the
-database role assignments above; **scopes come from the token's `scope` claim**,
-and the approval path enforces the policy's required scopes (mutations require
-`ops:write`). Mint a learning-mode token with:
+Every request needs `Authorization: Bearer <token>`. Roles **and scopes** are
+current database authority: the demo grants above carry `ops:read ops:write`,
+and the approval path requires the policy's scopes both as a DB assignment and
+as a `scope` claim on the token. The same checks run again before execution, so
+revoking a role or removing scopes blocks an already-approved intent. Mint a
+learning-mode token with:
 
 ```bash
 uv run python -m hitl_ops.dev_tokens --actor approver-1   # adds ops:read ops:write
