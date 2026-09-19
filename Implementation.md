@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Execute exactly one approved phase at a time. Use test-first implementation, review the diff against the phase acceptance criteria, and never advance status on partial evidence.
 
-**Status:** IMPLEMENTED — all phases through 09 `TESTED` locally (unit/contract/integration/e2e/security/failure); `REVIEWED`/`COMPLETE` follow the user end-to-end review gate  
+**Status:** COMPLETE — all ten phases are implemented, tested, reviewed, and verified on `main`; release verification and accepted limitations are recorded in `docs/architecture/architecture-review.md` §12.  
 **Goal:** Build a production-minded HITL AI Ops workflow in which model proposals pass deterministic risk, policy, human approval, revalidation, idempotent execution, and durable audit controls.  
 **Architecture:** Plain Python domain/application services own every business rule. FastAPI exposes strict contracts; PostgreSQL is authoritative; an isolated execution worker calls typed adapters; the audit trail is delivered through a transactional outbox.  
 **Tech stack:** Python 3.12+, FastAPI, Pydantic v2, PostgreSQL 16+, SQLAlchemy 2, Alembic, pytest, Ruff, mypy, HTTPX, OpenTelemetry, Docker, GitHub Actions; optional Redis only when justified.  
@@ -31,16 +31,16 @@ When documents disagree: PRD product rules → approval state machine legal tran
 
 | Phase | Deliverable | Depends on | Status |
 |---:|---|---|---|
-| 00 | Repository and application foundation | User approval | TESTED |
-| 01 | Immutable intent domain and PostgreSQL persistence | 00 | TESTED |
-| 02 | Risk and policy evaluation | 01 | TESTED |
-| 03 | Approval state machine, OIDC/RBAC, expiry | 02 | TESTED |
-| 04 | Revalidation, concurrency, idempotency | 03 | TESTED |
-| 05 | Execution service, demo adapter, reconciliation | 04 | TESTED |
-| 06 | FastAPI and agent orchestration | 05 | TESTED |
-| 07 | Audit trail, notification delivery, and observability | 06 | TESTED |
-| 08 | Security hardening and failure recovery | 07 | TESTED |
-| 09 | End-to-end validation, Docker/CI, learning release | 08 | TESTED |
+| 00 | Repository and application foundation | User approval | COMPLETE |
+| 01 | Immutable intent domain and PostgreSQL persistence | 00 | COMPLETE |
+| 02 | Risk and policy evaluation | 01 | COMPLETE |
+| 03 | Approval state machine, OIDC/RBAC, expiry | 02 | COMPLETE |
+| 04 | Revalidation, concurrency, idempotency | 03 | COMPLETE |
+| 05 | Execution service, demo adapter, reconciliation | 04 | COMPLETE |
+| 06 | FastAPI and agent orchestration | 05 | COMPLETE |
+| 07 | Audit trail, notification delivery, and observability | 06 | COMPLETE |
+| 08 | Security hardening and failure recovery | 07 | COMPLETE |
+| 09 | End-to-end validation, Docker/CI, learning release | 08 | COMPLETE |
 
 ## Cross-phase verification gates
 

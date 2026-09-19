@@ -1,6 +1,6 @@
 # Phase 08 — Security Hardening and Failure Recovery
 
-**Status:** TESTED — implemented with security (injection, tenancy, tokens, roles, redaction, dynamic-execution denial) and failure (database, LLM, adapter, audit sink, worker crash, Redis loss) suites plus operations runbooks and residual-risk evidence; `REVIEWED`/`COMPLETE` follow the user end-to-end review gate.
+**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
 
 ## Goal
 
