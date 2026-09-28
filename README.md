@@ -1,8 +1,8 @@
 # Project 05 — Human-in-the-Loop AI Ops Workflow
 
-**Status:** COMPLETE — all ten phases implemented, tested, reviewed, and verified on `main` (344 automated tests, live end-to-end check, migration rehearsal). Supported V1 limitations are listed in `docs/architecture/architecture-review.md` §12.
+**Status:** COMPLETE — all ten phases implemented, tested, reviewed, and verified on `main` (344 automated tests, live end-to-end check, migration rehearsal). Supported V1 limitations are listed in [`docs/architecture/architecture-review.md` §12 "Release verification and accepted limitations"](docs/architecture/architecture-review.md#12-release-verification-and-accepted-limitations).
 
-This repository plans a production-minded AI Ops workflow in which an LLM may propose actions but cannot execute infrastructure operations. Deterministic domain services classify risk, apply policy, collect human approval, revalidate the exact immutable intent, execute through allow-listed adapters, and append an audit trail.
+This repository implements a production-minded AI Ops workflow in which an LLM may propose actions but cannot execute infrastructure operations. Deterministic domain services classify risk, apply policy, collect human approval, revalidate the exact immutable intent, execute through allow-listed adapters, and append an audit trail.
 
 Start with [Implementation.md](Implementation.md), then follow the review order below. The application lives in `src/hitl_ops/` with migrations in `alembic/`; run and test commands are below.
 
