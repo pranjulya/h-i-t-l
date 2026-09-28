@@ -3,7 +3,7 @@
 `AGENTS.md` is the operating contract; read it before changing anything.
 
 - Read `Implementation.md` and the current phase file first. Implement one phase at a time, in numeric order.
-- Do not write application code until the user approves the planning package.
+- The planning package is already approved and complete on `main`. Do not expand scope without a PRD/architecture update first.
 - Keep business rules in plain Python domain/application services — never in prompts, routers, LangGraph nodes, or infrastructure adapters.
 - PostgreSQL is authoritative for intents, approvals, executions, and audit events. Redis may never be a source of truth.
 - Every state change commits inside a database transaction with an optimistic version check and an audit outbox row.

@@ -1,7 +1,7 @@
 # Agent instructions
 
 1. Read `Implementation.md` and the current phase file before changing anything.
-2. Do not write application code until the user approves the planning package.
+2. The planning package is already approved and complete on `main`. Do not expand scope without a PRD/architecture update first.
 3. Keep business rules in plain Python domain/application services; never place them in prompts, routers, LangGraph nodes, or infrastructure adapters.
 4. PostgreSQL is authoritative for intents, approvals, executions, and audit events. Redis may not be a source of truth.
 5. The LLM may propose only allow-listed tool intents and must never hold credentials or call infrastructure SDKs.

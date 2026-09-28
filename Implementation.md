@@ -1,8 +1,8 @@
-# Project 05 — Master Implementation Plan
+# Master Implementation Plan
 
 > **For agentic workers:** Execute exactly one approved phase at a time. Use test-first implementation, review the diff against the phase acceptance criteria, and never advance status on partial evidence.
 
-**Status:** COMPLETE — all ten phases are implemented, tested, reviewed, and verified on `main`; release verification and accepted limitations are recorded in `docs/architecture/architecture-review.md` §12.  
+**Status:** COMPLETE — all ten phases are implemented, tested, reviewed, and verified on `main`; release verification and accepted limitations are recorded in [`docs/architecture/architecture-review.md` §13](docs/architecture/architecture-review.md#13-release-verification-and-accepted-limitations).  
 **Goal:** Build a production-minded HITL AI Ops workflow in which model proposals pass deterministic risk, policy, human approval, revalidation, idempotent execution, and durable audit controls.  
 **Architecture:** Plain Python domain/application services own every business rule. FastAPI exposes strict contracts; PostgreSQL is authoritative; an isolated execution worker calls typed adapters; the audit trail is delivered through a transactional outbox.  
 **Tech stack:** Python 3.12+, FastAPI, Pydantic v2, PostgreSQL 16+, SQLAlchemy 2, Alembic, pytest, Ruff, mypy, HTTPX, OpenTelemetry, Docker, GitHub Actions; optional Redis only when justified.  
@@ -10,7 +10,7 @@
 
 ## Global constraints
 
-1. No application code begins before explicit user approval.
+1. The planning package and all ten phases are already approved and complete on `main`. Further application changes need an explicit scope decision (PRD/architecture path), not a re-approval of the original planning package.
 2. The five V1 tools and locked risk routes are the complete feature scope.
 3. LLM output is untrusted proposal data and never reaches an infrastructure SDK directly.
 4. Approved parameters are immutable; material change creates a new revision and stale approvals cannot execute.

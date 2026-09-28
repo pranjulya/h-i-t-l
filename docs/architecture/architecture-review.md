@@ -1,7 +1,7 @@
 # Architecture Review and Readiness Checklist
 
-**Review result:** READY_FOR_USER_REVIEW — all phases implemented and `TESTED`; release evidence appended in §11.  
-**Reviewed scope:** Planning documents (§1–§10) plus the implemented system's release evidence (§11).
+**Review result:** COMPLETE — all phases implemented, tested, reviewed, and verified on `main`; release evidence in §11, known limitations in §12, verification and accepted limitations in §13.  
+**Reviewed scope:** Planning documents (§1–§10), release evidence (§11), known limitations (§12), and release verification (§13).
 
 ## 1. Consistency review
 
@@ -131,7 +131,7 @@ the Compose topology are covered by `tests/failure/test_worker_crash.py`,
 `tests/contract/test_adapter_contract.py`, and the CI `compose-smoke` job
 respectively.
 
-## 12. Release verification and accepted limitations
+## 13. Release verification and accepted limitations
 
 Verified on merged `main` (`b38b0aa`), PostgreSQL 16.15, Python 3.12:
 

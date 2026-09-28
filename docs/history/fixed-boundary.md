@@ -1,3 +1,7 @@
+> **Historical.** Snapshot dated 2026-09-09 of open PRs #1–#10 with red CI.
+> Superseded by [`docs/architecture/architecture-review.md` §13](../architecture/architecture-review.md#13-release-verification-and-accepted-limitations).
+> Paths like `src/hitl_service/` in this file are obsolete; the package is `src/hitl_ops/`.
+
 # Fixed Boundaries — Consolidated PR Review
 
 Review snapshot: 2026-09-09
