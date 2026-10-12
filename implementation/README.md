@@ -1,6 +1,6 @@
 # Implementation phases
 
-All phases 00–09 are `COMPLETE`: implemented, tested, reviewed (review findings resolved), and verified on `main`. See [`architecture-review.md` §11 (evidence)](../docs/architecture/architecture-review.md) and [§13 (verification)](../docs/architecture/architecture-review.md#13-release-verification-and-accepted-limitations).
+Phases 00, 03, and 08 are `COMPLETE`. Phases 01, 02, 04, 05, 06, 07, and 09 are `TESTED`: implemented with passing suites, but their review gate re-opened on the verified gaps listed in [`architecture-review.md` §14 (known gaps)](../docs/architecture/architecture-review.md#14-known-gaps-open). Release verification and accepted limitations remain in [§13](../docs/architecture/architecture-review.md#13-release-verification-and-accepted-limitations).
 
 Every phase contains status, goal, rationale, prerequisites, concepts, exact planned files, architecture impact, data flow, edge/failure cases, tests, acceptance criteria, learning outcomes, interview questions, and Definition of Done. Follow numeric order; do not combine phases merely to save review time.
 

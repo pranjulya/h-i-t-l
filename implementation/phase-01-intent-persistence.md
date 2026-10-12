@@ -1,6 +1,6 @@
 # Phase 01 — Immutable Intent Domain and Persistence
 
-**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
+**Status:** TESTED — implementation and automated tests pass, but the review gate is not satisfied: the revision-creation requirement (AGENTS.md §7, approval-state-machine.md §6) is unimplemented (see §13-1).
 
 ## Goal
 

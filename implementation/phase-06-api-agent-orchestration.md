@@ -1,6 +1,6 @@
 # Phase 06 — API and Agent Orchestration
 
-**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
+**Status:** TESTED — implementation and automated tests pass, but the review gate is not satisfied: the error taxonomy diverges from PRD §10, and API modules contain risk/policy/state rules (see §13-8, §13-10).
 
 ## Goal
 
