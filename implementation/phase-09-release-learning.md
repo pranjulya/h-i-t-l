@@ -1,6 +1,6 @@
 # Phase 09 — Release, End-to-End Proof, and Learning Completion
 
-**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
+**Status:** TESTED — implementation and automated tests pass, but the review gate is not satisfied: this phase's DoD requires every phase COMPLETE; seven phases are reverted to TESTED pending §13 closure.
 
 ## Goal
 

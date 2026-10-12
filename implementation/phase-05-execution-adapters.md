@@ -1,6 +1,6 @@
 # Phase 05 — Execution Service, Adapter, and Reconciliation
 
-**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
+**Status:** TESTED — implementation and automated tests pass, but the review gate is not satisfied: provider calls run under the intent row lock, and the state machine carries EXECUTING→{STALE,EXPIRED} edges the state-machine doc does not authorise (see §13-5, §13-12).
 
 ## Goal
 

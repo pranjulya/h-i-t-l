@@ -1,6 +1,6 @@
 # Human-in-the-Loop AI Ops Workflow
 
-**Status:** COMPLETE — all ten phases implemented, tested, reviewed, and verified on `main` (344 automated tests, live end-to-end check, migration rehearsal). Supported V1 limitations are listed in [`docs/architecture/architecture-review.md` §13 "Release verification and accepted limitations"](docs/architecture/architecture-review.md#13-release-verification-and-accepted-limitations).
+**Status:** TESTED — all ten phases are implemented with passing suites, but seven are `TESTED` rather than `COMPLETE` pending the verified gaps in [`docs/architecture/architecture-review.md` §14 "Known gaps (open)"](docs/architecture/architecture-review.md#14-known-gaps-open). Supported V1 limitations are listed in [§13 "Release verification and accepted limitations"](docs/architecture/architecture-review.md#13-release-verification-and-accepted-limitations).
 
 This repository implements a production-minded AI Ops workflow in which an LLM may propose actions but cannot execute infrastructure operations. Deterministic domain services classify risk, apply policy, collect human approval, revalidate the exact immutable intent, execute through allow-listed adapters, and append an audit trail.
 

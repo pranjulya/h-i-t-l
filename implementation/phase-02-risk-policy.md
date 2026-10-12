@@ -1,6 +1,6 @@
 # Phase 02 — Deterministic Risk and Policy
 
-**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
+**Status:** TESTED — implementation and automated tests pass, but the review gate is not satisfied: the risk matrix in risk-policy-model.md §2 is incomplete — magnitude/bounds absent, unknown-context BLOCK unreachable (see §13-6).
 
 ## Goal
 

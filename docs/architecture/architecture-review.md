@@ -1,7 +1,7 @@
 # Architecture Review and Readiness Checklist
 
 **Review result:** COMPLETE — all phases implemented, tested, reviewed, and verified on `main`; release evidence in §11, known limitations in §12, verification and accepted limitations in §13.  
-**Reviewed scope:** Planning documents (§1–§10), release evidence (§11), known limitations (§12), and release verification (§13).
+**Reviewed scope:** Planning documents (§1–§10), release evidence (§11), known limitations (§12), and release verification (§14).
 
 ## 1. Consistency review
 
@@ -39,7 +39,7 @@
 
 - [x] Expected `state_version`, row locks/CAS, and uniqueness constraints define one winner.
 - [x] Approval binds intent ID, revision, digest, policy version, route, level, actor, scope, and expiry.
-- [x] Any material parameter change creates a new revision.
+- [ ] Any material parameter change creates a new revision — **no path writes `revision > 1`**; a material change today creates an unrelated intent instead of staling the revision. (§14-1)
 - [x] Approval and approver authorization are checked again at execution.
 - [x] Current risk/policy and live target context are re-evaluated immediately before adapter send.
 - [x] Conditional provider operations/precondition tokens are used where available.
@@ -58,16 +58,16 @@
 ## 6. Audit immutability
 
 - [x] State change and audit outbox commit atomically.
-- [x] Audit writer is append-only at the application permission layer.
+- [~] Audit writer is append-only at the application permission layer — the writer only appends, but no separate DB roles exist and `audit_events` shares the primary database. (§14-6)
 - [x] Per-aggregate ordering, previous hash, and event hash reveal edits/gaps.
-- [x] Separate retained sink and provider audit IDs improve independence.
+- [ ] Separate retained sink and provider audit IDs improve independence — single database; no `CREATE ROLE`/`GRANT` exists for writer/migration/audit/auditor roles. (§14-6)
 - [x] Historic policy/role/approval snapshots remain evidence, while current auth is rechecked.
-- [x] Audit backlog, hash mismatch, and sequence gaps generate alerts.
+- [ ] Audit backlog, hash mismatch, and sequence gaps generate alerts — no such metric or alert exists in the codebase. (§14-7)
 
 ## 7. Observability
 
-- [x] Correlation, causation, trace, intent, approval, execution, and provider identifiers are linked.
-- [x] Metrics cover risk/policy outcomes, pending/expired/stale approvals, illegal transitions, execution latency/outcomes, retries, unknown outcomes, reconciliation, and outbox lag.
+- [~] Correlation, causation, trace, intent, approval, execution, and provider identifiers are linked — approval and execution outbox payloads omit `correlation_id`, and the LLD §11 log fields are absent. (§14-7)
+- [ ] Metrics cover risk/policy outcomes, pending/expired/stale approvals, illegal transitions, execution latency/outcomes, retries, unknown outcomes, reconciliation, and outbox lag — the only counter in the codebase is `notifications_sent`. (§14-7)
 - [x] Labels avoid tenant/user/resource high cardinality.
 - [x] Logs/traces omit raw credentials and sensitive model/provider content.
 - [x] Recovery runbooks and failure drills are planned.
@@ -138,7 +138,7 @@ Verified on merged `main` (`b38b0aa`), PostgreSQL 16.15, Python 3.12:
 - **Automated suite:** 344 tests pass — unit, contract, integration, e2e, security, failure. Ruff format/lint and strict mypy exit 0 (the same command set CI runs).
 - **Migrations:** clean-database rehearsal `upgrade head → downgrade base → upgrade head`; 11 domain tables, downgrade leaves only `alembic_version`, head is `0008`. Readiness fails closed on a revision/head mismatch.
 - **Live end-to-end:** API + supervised worker + demo adapter; `tools/e2e_check.py` reports 41/41 — all five tools, all four risk routes, two-step CRITICAL with distinct approvers, rejection, cancellation, idempotent replay, mismatch conflict, unknown → reconciliation, audit-chain reconstruction, restart durability, and the security spot checks.
-- **Targeted proofs of the final review findings:** (a) an expired approval returns 409 *and* the intent durably becomes `EXPIRED`, with a fresh-key retry observing the conflict; (b) every live-target lookup failure fails closed — timeout, transport error, malformed response — and none leaves a claim stranded in `REVALIDATING`; (c) removing an approver's scopes after approval blocks execution with `approver_scopes_revoked` while the role remains granted; (d) `notification_delivered` appears in the hash-linked audit trail; (e) production configuration rejects a short or demo identity secret.
+- **Targeted proofs of the final review findings:** (a) an expired approval returns 409 *and* the intent durably becomes `EXPIRED`, with a fresh-key retry observing the conflict; (b) every live-target lookup failure fails closed — timeout, transport error, malformed response — and no lookup failure leaves a claim stranded in `REVALIDATING` (a process crash between the claim commit and the gates is a separate, still-open window — §14-2); (c) removing an approver's scopes after approval blocks execution with `approver_scopes_revoked` while the role remains granted; (d) `notification_delivered` appears in the hash-linked audit trail; (e) production configuration rejects a short or demo identity secret.
 - **Operations:** `docs/operations/runbooks.md` (six runbooks), `docs/operations/release-checklist.md`, `docs/operations/demo-script.md`; CI runs quality, tests, migrations, docker build, and a compose smoke test on every PR.
 
 ### Accepted limitations (explicit, carried as V1 residual risk)
@@ -153,3 +153,31 @@ Verified on merged `main` (`b38b0aa`), PostgreSQL 16.15, Python 3.12:
 | LangGraph deferred | No measured orchestration value yet; graph checkpoints must never be authoritative state | Post-V1 evaluation — ADR-012 |
 
 Reopening any of these requires the PRD/architecture path in `Implementation.md` (authoritative precedence) rather than a code-only change.
+
+> Status note: the release verification above stands for what it tested, but the sections marked `[~]`/`[ ]` in §§4–7 and the gaps in §14 mean phases 01, 02, 04, 05, 06, 07, and 09 are `TESTED`, not `COMPLETE`.
+
+## 14. Known gaps (open)
+
+Findings from a two-axis code review of the full implementation (`fe9b212...HEAD`), each independently re-verified against the code before listing. Notation above: `[x]` verified, `[~]` partial, `[ ]` not implemented.
+
+**Correctness / spec**
+
+1. **Intent revisions cannot be created.** No code path writes `revision > 1`; `POST /intents` hardcodes `revision=1` and mints a new intent ID, so a material change does not stale the prior approval (`api/intents.py`, verified by grep — `approval-state-machine.md` §6 requires otherwise).
+2. **Crash between claim commit and gates strands `REVALIDATING`.** `claim_and_revalidate` commits the claim, then re-verifies in a later transaction; worker selection covers only `AUTO_APPROVED`/`APPROVED` (`worker.py:44`) and recovery only `status == "EXECUTING"` (`worker.py:229`), so a process death in that window leaves a revision nothing can move or cancel.
+3. **LLD §9 step 6 is absent at execution.** Obligations are acknowledged at decision time only; `_revalidate_gates` never checks them, and preconditions compare only `service`/`resource_id`/`name` (replicas, size, cost_class, deletion_mode, region are not compared with live state) — `revalidation.py`.
+4. **Revalidation order differs from LLD §9.** The live target is fetched before the digest/TTL/authorization/policy gates, so a stale or expired revision still triggers a privileged live read — deliberate (lock-free read), but the LLD was not updated.
+5. **Provider calls run while holding the intent row lock.** `execution.py` and `reconciliation.py` await the adapter inside the `with_for_update()` transaction; a slow provider blocks approve/cancel on that row.
+6. **Risk engine omits mandated factors.** Only environment, cost_class, degraded dependencies, and policy flags are evaluated (`risk.py`); magnitude, reversibility, sensitivity, and service-condition inputs are absent, `RiskContext()` is always empty in both call sites, and `replicas` is accepted as `0..1000` (`agent/schemas.py:87`) — `risk-policy-model.md` §2 requires at least HIGH outside bounds.
+7. **Notification content is not the agreed summary.** The notification carries state and a link only — no digest, tool, parameters, or target (`infrastructure/notification.py`), against `threat-model.md` notification-deception control.
+8. **Error taxonomy diverges from the PRD.** `UNAUTHORIZED`, `PRECONDITION_FAILED`, and `APPROVAL_REQUIRED` are never emitted; a real policy BLOCK returns 201 with state `BLOCKED` rather than `POLICY_BLOCKED` (`api/intents.py`, `api/errors.py`).
+9. **`GET /intents/{id}/events` exposes the audit chain to any same-tenant actor**, not only `audit:read` holders (`risk-policy-model.md` §8).
+
+**Layering / standards**
+
+10. **Risk/policy orchestration lives in the router** (`api/intents.py:86-87`) with no application-layer create-intent service; `revalidation.py:671` duplicates the same calls — AGENTS.md §3 places business rules in domain/application services.
+11. **The repository bypasses the transition guard**, writing `intent.state` and a literal `intent.state_version = 4` (`infrastructure/repositories.py`).
+12. **Invented state-machine edges:** `EXECUTING → {STALE, EXPIRED}` exist in code but not in `approval-state-machine.md` §2, and the transition bookkeeping is re-implemented across five modules (shotgun surgery).
+
+**Evidence**
+
+13. This checklist previously asserted items 1, 6, and 7 as verified; they are corrected above. Verified-green claims that still hold: the durable-expiry fix, lookup-failure fail-closed behaviour, scope revocation at execution, audited notification delivery, and production secret enforcement (§12).

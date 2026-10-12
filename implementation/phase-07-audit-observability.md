@@ -1,6 +1,6 @@
 # Phase 07 — Audit Trail, Notification Delivery, and Observability
 
-**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
+**Status:** TESTED — implementation and automated tests pass, but the review gate is not satisfied: notification content lacks the agreed digest summary, and the telemetry/alert DoD items have no tests or implementation (see §13-7, §13-11).
 
 ## Goal
 

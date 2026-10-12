@@ -1,6 +1,6 @@
 # Phase 04 — Revalidation, Concurrency, and Idempotency
 
-**Status:** COMPLETE — implemented, tested, reviewed (review findings resolved in PRs #13–#15), and verified on merged main: full suite green, Ruff + strict mypy clean, live end-to-end check passing.
+**Status:** TESTED — implementation and automated tests pass, but the review gate is not satisfied: a crash during claim strands REVALIDATING, and revalidation order differs from LLD §9 (see §13-2, §13-4).
 
 ## Goal
 
