@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from hitl_ops.application.commands import canonical_request_hash, idempotency_key_hash
 
 
@@ -21,3 +23,22 @@ def test_key_hash_is_stable_and_unrevealing() -> None:
     assert idempotency_key_hash("abc") == idempotency_key_hash("abc")
     assert idempotency_key_hash("abc") != idempotency_key_hash("abd")
     assert len(idempotency_key_hash("abc")) == 64
+
+
+def test_whitespace_only_idempotency_key_is_rejected() -> None:
+    from hitl_ops.api.dependencies import require_idempotency_key
+    from hitl_ops.domain.errors import DomainError
+
+    with pytest.raises(DomainError) as exc_info:
+        require_idempotency_key("   ")
+    assert exc_info.value.code == "VALIDATION_FAILED"
+    assert exc_info.value.http_status == 422
+
+
+def test_empty_idempotency_key_is_rejected() -> None:
+    from hitl_ops.api.dependencies import require_idempotency_key
+    from hitl_ops.domain.errors import DomainError
+
+    with pytest.raises(DomainError) as exc_info:
+        require_idempotency_key("")
+    assert exc_info.value.code == "VALIDATION_FAILED"

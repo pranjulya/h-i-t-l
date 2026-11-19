@@ -6,7 +6,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 
 from hitl_ops.agent.orchestrator import AgentOrchestrator
@@ -136,6 +136,13 @@ class AgentIntentBody(BaseModel):
 
     request: str = Field(min_length=1, max_length=4000)
     context_refs: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("request")
+    @classmethod
+    def request_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
 
 
 @router.post("/agent/intents", status_code=201)

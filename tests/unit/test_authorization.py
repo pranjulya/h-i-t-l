@@ -96,6 +96,35 @@ def test_actor_requires_tenant_and_subject() -> None:
         AuthenticatedActor(actor_id="", tenant_id="tenant-1", correlation_id="")
 
 
+def test_whitespace_only_tenant_is_rejected() -> None:
+    with pytest.raises(IdentityValidationError):
+        validate_token(
+            _token(tenant="   "),
+            shared_secret=_SECRET,
+            issuer=_ISSUER,
+            audience=_AUDIENCE,
+            now=_NOW,
+        )
+
+
+def test_whitespace_only_subject_is_rejected() -> None:
+    with pytest.raises(IdentityValidationError):
+        validate_token(
+            _token(sub="   "),
+            shared_secret=_SECRET,
+            issuer=_ISSUER,
+            audience=_AUDIENCE,
+            now=_NOW,
+        )
+
+
+def test_actor_rejects_whitespace_only_ids() -> None:
+    with pytest.raises(IdentityValidationError):
+        AuthenticatedActor(actor_id="   ", tenant_id="tenant-1", correlation_id="")
+    with pytest.raises(IdentityValidationError):
+        AuthenticatedActor(actor_id="user-1", tenant_id="   ", correlation_id="")
+
+
 def _assignment(**overrides: object) -> RoleAssignment:
     values: dict = {
         "role": "approver",

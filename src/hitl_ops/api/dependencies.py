@@ -64,7 +64,7 @@ def get_idempotency_key(idempotency_key: Annotated[str | None, Header()] = None)
 def require_idempotency_key(key: str = Depends(get_idempotency_key)) -> str:
     from hitl_ops.domain.errors import DomainError
 
-    if not key:
+    if not key.strip():
         raise DomainError(
             "Idempotency-Key header is required for mutations",
             code="VALIDATION_FAILED",
