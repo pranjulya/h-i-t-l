@@ -26,7 +26,7 @@ class AuthenticatedActor:
     scopes: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
-        if not self.actor_id or not self.tenant_id:
+        if not self.actor_id.strip() or not self.tenant_id.strip():
             raise IdentityValidationError("token must carry actor and tenant")
 
 
@@ -57,12 +57,15 @@ def validate_token(
     except jwt.PyJWTError as exc:
         raise IdentityValidationError("token validation failed") from exc
     tenant = claims.get("tenant")
-    if not isinstance(tenant, str) or not tenant:
+    if not isinstance(tenant, str) or not tenant.strip():
         raise IdentityValidationError("token must carry a tenant claim")
     correlation = claims.get("correlation_id", "")
     scopes = _parse_scopes(claims.get("scope", claims.get("scopes", "")))
+    actor_id = str(claims["sub"])
+    if not actor_id.strip():
+        raise IdentityValidationError("token must carry actor and tenant")
     return AuthenticatedActor(
-        actor_id=str(claims["sub"]),
+        actor_id=actor_id,
         tenant_id=tenant,
         correlation_id=str(correlation),
         scopes=scopes,
