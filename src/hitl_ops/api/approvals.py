@@ -9,6 +9,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
 from hitl_ops.api.dependencies import ActorDep, IdempotencyDep, SessionDep
+from hitl_ops.api.validation import NonBlankStr
 from hitl_ops.application.commands import (
     ApprovalCommandService,
     ApprovalDecisionCommand,
@@ -29,7 +30,7 @@ class ApprovalBody(BaseModel):
     intent_digest: str = Field(min_length=64, max_length=64)
     level: int = Field(ge=1, le=2)
     decision: Literal["APPROVE", "REJECT"]
-    reason: str = Field(min_length=1, max_length=2000)
+    reason: NonBlankStr = Field(min_length=1, max_length=2000)
     expected_state_version: int = Field(ge=1)
     obligations: dict[str, str] = Field(default_factory=dict)
 
@@ -38,7 +39,7 @@ class CancelBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     revision: int = Field(ge=1)
-    reason: str = Field(min_length=1, max_length=2000)
+    reason: NonBlankStr = Field(min_length=1, max_length=2000)
     expected_state_version: int = Field(ge=1)
 
 

@@ -10,6 +10,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, ConfigDict, Field
 
 from hitl_ops.api.dependencies import ActorDep, IdempotencyDep, SessionDep
+from hitl_ops.api.validation import NonBlankStr
 from hitl_ops.application.administration import (
     ActivatePolicyBundleCommand,
     AdministrationService,
@@ -25,18 +26,18 @@ router = APIRouter(prefix="/v1/admin")
 class GrantRoleBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    principal_id: str = Field(min_length=1, max_length=255)
-    role: str = Field(min_length=1, max_length=63)
+    principal_id: NonBlankStr = Field(min_length=1, max_length=255)
+    role: NonBlankStr = Field(min_length=1, max_length=63)
     environments: list[str] = Field(default_factory=list, max_length=10)
     scopes: list[str] = Field(default_factory=list, max_length=20)
     valid_until: datetime | None = None
-    reason: str = Field(min_length=1, max_length=2000)
+    reason: NonBlankStr = Field(min_length=1, max_length=2000)
 
 
 class RevokeRoleBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    reason: str = Field(min_length=1, max_length=2000)
+    reason: NonBlankStr = Field(min_length=1, max_length=2000)
 
 
 class RegisterBundleBody(BaseModel):
@@ -44,13 +45,13 @@ class RegisterBundleBody(BaseModel):
 
     version: str = Field(min_length=1, max_length=32, pattern=r"^[a-z0-9-]+$")
     rules: dict[str, Any]
-    reason: str = Field(min_length=1, max_length=2000)
+    reason: NonBlankStr = Field(min_length=1, max_length=2000)
 
 
 class ActivateBundleBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    reason: str = Field(min_length=1, max_length=2000)
+    reason: NonBlankStr = Field(min_length=1, max_length=2000)
 
 
 async def _reserve(
